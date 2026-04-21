@@ -10,6 +10,7 @@
 #include <cmath>
 #include <iomanip>
 
+
 bool nearlyEqual(float a, float b, float eps = 1e-4f)
 {
 	return std::fabs(a - b) < eps;

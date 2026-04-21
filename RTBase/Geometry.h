@@ -42,10 +42,16 @@ public:
 	bool rayIntersect(Ray& r, float& t)
 	{
 		// Change this so it uses the built in dot product
-		float denom = (n.x * r.dir.x) + (n.y * r.dir.y) + (n.z * r.dir.z);
-		float dotno = (n.x * r.o.x) + (n.y * r.o.y) + (n.z * r.o.z);
-		float numerator = -(dotno + d);
-		t = numerator / denom;
+		float denom = Dot(n, r.dir);
+		if (denom == 0.0f) {
+			return false;
+		}
+		t = (d - Dot(n, r.o)) / denom;
+		if (t < 0.0f)
+		{
+			return false;
+		}
+		return true;
 
 		if (t < 0.0f) {
 			return false;
@@ -202,6 +208,29 @@ public:
 	// Add code here
 	bool rayIntersect(Ray& r, float& t)
 	{
+		Vec3 oc = r.o - centre;
+		float a = Dot(r.dir, r.dir);
+		float b = 2.0f * Dot(oc, r.dir);
+		float c = Dot(oc, oc) - (radius * radius);
+		float discriminant = (b * b) - (4.0f * a * c);
+		if (discriminant < 0.0f)
+		{
+			return false;
+		}
+		float root = sqrtf(discriminant);
+		float inv2a = 0.5f / a;
+		float t0 = (-b - root) * inv2a;
+		float t1 = (-b + root) * inv2a;
+		if (t0 > EPSILON)
+		{
+			t = t0;
+			return true;
+		}
+		if (t1 > EPSILON)
+		{
+			t = t1;
+			return true;
+		}
 		return false;
 	}
 };
