@@ -193,7 +193,7 @@ public:
 							float py = y + 0.5f;
 							Ray ray = scene->camera.generateRay(px, py);
 							
-							Colour col = albedo(ray);
+							Colour col = direct(ray, &samplers[threadID]);
 							
 							film->splat(px, py, col);
 							unsigned char r = (unsigned char)(col.r * 255);
