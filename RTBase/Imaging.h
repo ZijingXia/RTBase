@@ -152,6 +152,53 @@ public:
 	}
 };
 
+class TentFilter : public ImageFilter
+{
+public:
+	float filter(const float x, const float y) const
+	{
+		float fx = std::max(0.0f, 1.0f - fabsf(x));
+		float fy = std::max(0.0f, 1.0f - fabsf(y));
+		return fx * fy;
+	}
+
+	int size() const
+	{
+		return 1;
+	}
+};
+
+class GaussianFilter : public ImageFilter
+{
+public:
+	float sigma;
+
+	GaussianFilter(float s = 1.0f)
+	{
+		sigma = s;
+	}
+
+	float gaussian1D(float d) const
+	{
+		return expf(-(d * d) / (2.0f * sigma * sigma));
+	}
+
+	float filter(const float x, const float y) const
+	{
+		if (fabsf(x) > 2.0f || fabsf(y) > 2.0f)
+		{
+			return 0.0f;
+		}
+
+		return gaussian1D(x) * gaussian1D(y);
+	}
+
+	int size() const
+	{
+		return 2;
+	}
+};
+
 class Film
 {
 public:
@@ -160,14 +207,68 @@ public:
 	unsigned int height;
 	int SPP;
 	ImageFilter* filter;
+
 	void splat(const float x, const float y, const Colour& L)
 	{
-		// Code to splat a smaple with colour L into the image plane using an ImageFilter
+		float filterWeights[25];
+		unsigned int indices[25];
+		unsigned int used = 0;
+		float total = 0.0f;
+
+		int size = filter->size();
+
+		for (int i = -size; i <= size; i++)
+		{
+			for (int j = -size; j <= size; j++)
+			{
+				int px = (int)x + j;
+				int py = (int)y + i;
+
+				if (px >= 0 && px < width && py >= 0 && py < height)
+				{
+					indices[used] = (py * width) + px;
+					filterWeights[used] = filter->filter((px + 0.5f) - x, (py + 0.5f) - y);
+					total += filterWeights[used];
+					used++;
+				}
+			}
+		}
+
+		if (total == 0.0f)
+		{
+			return;
+		}
+
+		for (unsigned int i = 0; i < used; i++)
+		{
+			film[indices[i]] = film[indices[i]] + (L * filterWeights[i] / total);
+		}
 	}
-	void tonemap(int x, int y, unsigned char& r, unsigned char& g, unsigned char& b, float exposure = 1.0f)
+
+	void tonemap(int x, int y, unsigned char& r, unsigned char& g, unsigned char& b)
 	{
-		// Return a tonemapped pixel at coordinates x, y
+		if (SPP == 0)
+		{
+			r = g = b = 0;
+			return;
+		}
+
+		Colour c = film[y * width + x] / (float)SPP;
+
+		c.r = c.r / (1.0f + c.r);
+		c.g = c.g / (1.0f + c.g);
+		c.b = c.b / (1.0f + c.b);
+
+		float invGamma = 1.0f / 2.2f;
+		c.r = powf(c.r, invGamma);
+		c.g = powf(c.g, invGamma);
+		c.b = powf(c.b, invGamma);
+
+		r = (unsigned char)(std::min(1.0f, c.r) * 255.0f);
+		g = (unsigned char)(std::min(1.0f, c.g) * 255.0f);
+		b = (unsigned char)(std::min(1.0f, c.b) * 255.0f);
 	}
+
 	// Do not change any code below this line
 	void init(int _width, int _height, ImageFilter* _filter)
 	{

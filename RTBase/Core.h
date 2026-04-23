@@ -86,6 +86,15 @@ public:
 		c.b = b / v;
 		return c;
 	}
+
+	Colour& operator+=(const Colour& c)
+	{
+		r = r + c.r;
+		g = g + c.g;
+		b = b + c.b;
+		return *this;
+	}
+
 	float Lum()
 	{
 		return ((0.2126f * r) + (0.7152f * g) + (0.0722f * b));
