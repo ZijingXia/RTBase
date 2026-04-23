@@ -84,6 +84,13 @@ public:
 	void build()
 	{
 		// Add BVH building code here
+		if (bvh != NULL)
+		{
+			delete bvh;
+			bvh = NULL;
+		}
+		bvh = new BVHNode();
+		bvh->build(triangles);
 
 		// Do not touch the code below this line!
 		// Build light list

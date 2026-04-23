@@ -11,6 +11,16 @@
 #include <thread>
 #include <functional>
 #include <atomic>
+#include <vector>
+#include <chrono>
+#include <mutex>
+#include <condition_variable>
+#if __has_include(<OpenImageDenoise/oidn.hpp>)
+#include <OpenImageDenoise/oidn.hpp>
+#define RTBASE_HAS_OIDN 1
+#else
+#define RTBASE_HAS_OIDN 0
+#endif
 
 class RayTracer
 {
@@ -19,8 +29,27 @@ public:
 	GamesEngineeringBase::Window* canvas;
 	Film* film;
 	MTRandom *samplers;
-	std::thread **threads;
 	int numProcs;
+	std::vector<std::thread> workers;
+	std::mutex workerMutex;
+	std::condition_variable workerCV;
+	std::condition_variable workerDoneCV;
+	std::atomic<unsigned int> nextTile = 0;
+	unsigned int totalTiles = 0;
+	std::atomic<int> activeWorkers = 0;
+	bool stopWorkers = false;
+	int submittedFrameID = 0;
+	int denoiseIntervalSPP = 8;
+	std::vector<float> beautyAOV;
+	std::vector<float> normalAOV;
+	std::vector<float> albedoAOV;
+	std::vector<float> denoisedAOV;
+	bool denoiserEnabled = true;
+	bool denoiseFailed = false;
+#if RTBASE_HAS_OIDN
+	oidn::DeviceRef oidnDevice;
+#endif
+
 	void init(Scene* _scene, GamesEngineeringBase::Window* _canvas)
 	{
 		scene = _scene;
@@ -29,14 +58,55 @@ public:
 		film->init((unsigned int)scene->camera.width, (unsigned int)scene->camera.height, new BoxFilter());
 		SYSTEM_INFO sysInfo;
 		GetSystemInfo(&sysInfo);
-		numProcs = sysInfo.dwNumberOfProcessors;
-		threads = new std::thread*[numProcs];
+
+		numProcs = 11;
+
 		samplers = new MTRandom[numProcs];
+		for (int i = 0; i < numProcs; ++i)
+		{
+			samplers[i] = MTRandom((unsigned int)(1337 + (i * 977)));
+		}
+		for (int i = 0; i < numProcs; ++i)
+		{
+			workers.emplace_back([this, i]() { workerLoop(i); });
+		}
+		const size_t pixelCount = (size_t)film->width * (size_t)film->height;
+		beautyAOV.resize(pixelCount * 3, 0.0f);
+		normalAOV.resize(pixelCount * 3, 0.0f);
+		albedoAOV.resize(pixelCount * 3, 0.0f);
+		denoisedAOV.resize(pixelCount * 3, 0.0f);
+#if RTBASE_HAS_OIDN
+		oidnDevice = oidn::newDevice();
+		oidnDevice.commit();
+#endif
+
 		clear();
 	}
 	void clear()
 	{
 		film->clear();
+		std::fill(beautyAOV.begin(), beautyAOV.end(), 0.0f);
+		std::fill(normalAOV.begin(), normalAOV.end(), 0.0f);
+		std::fill(albedoAOV.begin(), albedoAOV.end(), 0.0f);
+		std::fill(denoisedAOV.begin(), denoisedAOV.end(), 0.0f);
+		denoiseFailed = false;
+	}
+	~RayTracer()
+	{
+		{
+			std::lock_guard<std::mutex> lock(workerMutex);
+			stopWorkers = true;
+			submittedFrameID++;
+		}
+		workerCV.notify_all();
+		for (std::thread& worker : workers)
+		{
+			if (worker.joinable())
+			{
+				worker.join();
+			}
+		}
+		delete[] samplers;
 	}
 	Colour computeDirect(ShadingData shadingData, Sampler* sampler)
 	{
@@ -83,7 +153,7 @@ public:
 		}
 		return Ld / (float)directSamples;
 	}
-	Colour pathTrace(Ray& r, Colour& pathThroughput, int depth, Sampler* sampler)
+	Colour pathTrace(Ray& r, const Colour& pathThroughput, int depth, Sampler* sampler)
 	{
 		// Add pathtracer code here
 		if (depth > 5)
@@ -168,53 +238,39 @@ public:
 		const unsigned int tileSize = 16;
 		const unsigned int tilesX = (film->width + tileSize - 1) / tileSize;
 		const unsigned int tilesY = (film->height + tileSize - 1) / tileSize;
-		const unsigned int totalTiles = tilesX * tilesY;
-		std::atomic<unsigned int> nextTile(0);
-		auto worker = [&](int threadID)
-			{
-				while (true)
-				{
-					unsigned int tileID = nextTile.fetch_add(1);
-					if (tileID >= totalTiles)
-					{
-						break;
-					}
-					unsigned int tileX = tileID % tilesX;
-					unsigned int tileY = tileID / tilesX;
-					unsigned int x0 = tileX * tileSize;
-					unsigned int y0 = tileY * tileSize;
-					unsigned int x1 = std::min(x0 + tileSize, film->width);
-					unsigned int y1 = std::min(y0 + tileSize, film->height);
-					for (unsigned int y = y0; y < y1; y++)
-					{
-						for (unsigned int x = x0; x < x1; x++)
-						{
-							float px = x + 0.5f;
-							float py = y + 0.5f;
-							Ray ray = scene->camera.generateRay(px, py);
-							
-							Colour col = viewNormals(ray);
-							
-							film->splat(px, py, col);
-							unsigned char r = (unsigned char)(col.r * 255);
-							unsigned char g = (unsigned char)(col.g * 255);
-							unsigned char b = (unsigned char)(col.b * 255);
-							film->tonemap(x, y, r, g, b);
-
-							canvas->draw(x, y, r, g, b);
-						}
-					}
-				}
-			};
-		for (int i = 0; i < numProcs; i++)
+		totalTiles = tilesX * tilesY;
+		nextTile.store(0);
+		activeWorkers.store(numProcs);
 		{
-			threads[i] = new std::thread(worker, i);
+			std::lock_guard<std::mutex> lock(workerMutex);
+			submittedFrameID++;
 		}
-		for (int i = 0; i < numProcs; i++)
+		workerCV.notify_all();
 		{
-			threads[i]->join();
-			delete threads[i];
-			threads[i] = NULL;
+			std::unique_lock<std::mutex> lock(workerMutex);
+			workerDoneCV.wait(lock, [this]() { return activeWorkers.load() == 0; });
+		}
+		if (denoiserEnabled && denoiseFailed == false && (film->SPP % denoiseIntervalSPP == 0))
+		{
+			runDenoiser();
+		}
+		else
+		{
+			for (unsigned int y = 0; y < film->height; y++)
+			{
+				for (unsigned int x = 0; x < film->width; x++)
+				{
+					unsigned char r;
+					unsigned char g;
+					unsigned char b;
+					film->tonemap(x, y, r, g, b);
+					canvas->draw(x, y, r, g, b);
+				}
+			}
+		}
+		if (denoiserEnabled && denoiseFailed == false)
+		{
+			runDenoiser();
 		}
 	}
 	int getSPP()
@@ -228,5 +284,132 @@ public:
 	void savePNG(std::string filename)
 	{
 		stbi_write_png(filename.c_str(), canvas->getWidth(), canvas->getHeight(), 3, canvas->getBackBuffer(), canvas->getWidth() * 3);
+	}
+
+private:
+	void workerLoop(int threadID)
+	{
+		int observedFrameID = 0;
+		const bool skipSplatForBoxFilter = (dynamic_cast<BoxFilter*>(film->filter) != NULL);
+		while (true)
+		{
+			{
+				std::unique_lock<std::mutex> lock(workerMutex);
+				workerCV.wait(lock, [this, &observedFrameID]() { return stopWorkers || submittedFrameID > observedFrameID; });
+				if (stopWorkers)
+				{
+					return;
+				}
+				observedFrameID = submittedFrameID;
+			}
+			while (true)
+			{
+				unsigned int tileID = nextTile.fetch_add(1);
+				if (tileID >= totalTiles)
+				{
+					break;
+				}
+				shadeTile(tileID, threadID, skipSplatForBoxFilter);
+			}
+			if (activeWorkers.fetch_sub(1) == 1)
+			{
+				std::lock_guard<std::mutex> lock(workerMutex);
+				workerDoneCV.notify_one();
+			}
+		}
+	}
+	void shadeTile(unsigned int tileID, int threadID, bool skipSplatForBoxFilter)
+	{
+		const unsigned int tileSize = 16;
+		const unsigned int tilesX = (film->width + tileSize - 1) / tileSize;
+		unsigned int tileX = tileID % tilesX;
+		unsigned int tileY = tileID / tilesX;
+		unsigned int x0 = tileX * tileSize;
+		unsigned int y0 = tileY * tileSize;
+		unsigned int x1 = std::min(x0 + tileSize, film->width);
+		unsigned int y1 = std::min(y0 + tileSize, film->height);
+		for (unsigned int y = y0; y < y1; y++)
+		{
+			for (unsigned int x = x0; x < x1; x++)
+			{
+				float px = x + 0.5f;
+				float py = y + 0.5f;
+				Ray ray = scene->camera.generateRay(px, py);
+
+				Colour col = pathTrace(ray, Colour(1.0f, 1.0f, 1.0f), 0, &samplers[threadID]);
+				Colour normal = viewNormals(ray);
+				Colour alb = albedo(ray);
+				const unsigned int idx = ((y * film->width) + x) * 3;
+				beautyAOV[idx] += col.r;
+				beautyAOV[idx + 1] += col.g;
+				beautyAOV[idx + 2] += col.b;
+				normalAOV[idx] += normal.r;
+				normalAOV[idx + 1] += normal.g;
+				normalAOV[idx + 2] += normal.b;
+				albedoAOV[idx] += alb.r;
+				albedoAOV[idx + 1] += alb.g;
+				albedoAOV[idx + 2] += alb.b;
+
+				if (skipSplatForBoxFilter)
+				{
+					const unsigned int pixelID = (y * film->width) + x;
+					film->film[pixelID] = film->film[pixelID] + col;
+				}
+				else
+				{
+					film->splat(px, py, col);
+				}
+			}
+		}
+	}
+	void runDenoiser()
+	{
+#if RTBASE_HAS_OIDN
+		if (film->SPP <= 0)
+		{
+			return;
+		}
+		const float invSPP = 1.0f / (float)film->SPP;
+		for (size_t i = 0; i < beautyAOV.size(); ++i)
+		{
+			beautyAOV[i] *= invSPP;
+			normalAOV[i] *= invSPP;
+			albedoAOV[i] *= invSPP;
+		}
+		oidn::FilterRef filter = oidnDevice.newFilter("RT");
+		filter.setImage("color", beautyAOV.data(), oidn::Format::Float3, film->width, film->height);
+		filter.setImage("normal", normalAOV.data(), oidn::Format::Float3, film->width, film->height);
+		filter.setImage("albedo", albedoAOV.data(), oidn::Format::Float3, film->width, film->height);
+		filter.setImage("output", denoisedAOV.data(), oidn::Format::Float3, film->width, film->height);
+		filter.set("hdr", true);
+		filter.commit();
+		filter.execute();
+		const char* errorMessage;
+		if (oidnDevice.getError(errorMessage) != oidn::Error::None)
+		{
+			denoiseFailed = true;
+			return;
+		}
+		for (unsigned int y = 0; y < film->height; ++y)
+		{
+			for (unsigned int x = 0; x < film->width; ++x)
+			{
+				const unsigned int idx = ((y * film->width) + x) * 3;
+				Colour c(denoisedAOV[idx], denoisedAOV[idx + 1], denoisedAOV[idx + 2]);
+				unsigned char r = (unsigned char)(std::min(1.0f, std::max(0.0f, c.r / (1.0f + c.r))) * 255.0f);
+				unsigned char g = (unsigned char)(std::min(1.0f, std::max(0.0f, c.g / (1.0f + c.g))) * 255.0f);
+				unsigned char b = (unsigned char)(std::min(1.0f, std::max(0.0f, c.b / (1.0f + c.b))) * 255.0f);
+				canvas->draw(x, y, r, g, b);
+			}
+		}
+		for (size_t i = 0; i < beautyAOV.size(); ++i)
+		{
+			beautyAOV[i] /= invSPP;
+			normalAOV[i] /= invSPP;
+			albedoAOV[i] /= invSPP;
+		}
+#else
+		denoiseFailed = true;
+#endif
 	}
 };

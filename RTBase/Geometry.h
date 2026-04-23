@@ -2,6 +2,7 @@
 
 #include "Core.h"
 #include "Sampling.h"
+#include <numeric>
 
 class Ray
 {
@@ -257,21 +258,82 @@ public:
 	BVHNode* l;
 	// This can store an offset and number of triangles in a global triangle list for example
 	// But you can store this however you want!
-	// unsigned int offset;
-	// unsigned char num;
+	unsigned int offset;
+	unsigned char num;
+	bool leaf;
 	BVHNode()
 	{
 		r = NULL;
 		l = NULL;
+		offset = 0;
+		num = 0;
+		leaf = true;
 	}
 	// Note there are several options for how to implement the build method. Update this as required
 	void build(std::vector<Triangle>& inputTriangles)
 	{
 		// Add BVH building code here
+		if (inputTriangles.empty())
+		{
+			leaf = true;
+			offset = 0;
+			num = 0;
+			return;
+		}
+		buildRecursive(inputTriangles, 0, (unsigned int)inputTriangles.size());
 	}
 	void traverse(const Ray& ray, const std::vector<Triangle>& triangles, IntersectionData& intersection)
 	{
 		// Add BVH Traversal code here
+		float boxHitT;
+		if (bounds.rayAABB(ray, boxHitT) == false || boxHitT > intersection.t)
+		{
+			return;
+		}
+		if (leaf)
+		{
+			for (unsigned int i = 0; i < num; ++i)
+			{
+				const unsigned int triIndex = offset + i;
+				float t;
+				float u;
+				float v;
+				if (triangles[triIndex].rayIntersect(ray, t, u, v) && t < intersection.t)
+				{
+					intersection.t = t;
+					intersection.ID = triIndex;
+					intersection.alpha = u;
+					intersection.beta = v;
+					intersection.gamma = 1.0f - (u + v);
+				}
+			}
+			return;
+		}
+		float tLeft = FLT_MAX;
+		float tRight = FLT_MAX;
+		const bool hitLeft = (l != NULL) ? l->bounds.rayAABB(ray, tLeft) : false;
+		const bool hitRight = (r != NULL) ? r->bounds.rayAABB(ray, tRight) : false;
+		if (hitLeft && hitRight)
+		{
+			if (tLeft < tRight)
+			{
+				l->traverse(ray, triangles, intersection);
+				r->traverse(ray, triangles, intersection);
+			}
+			else
+			{
+				r->traverse(ray, triangles, intersection);
+				l->traverse(ray, triangles, intersection);
+			}
+		}
+		else if (hitLeft)
+		{
+			l->traverse(ray, triangles, intersection);
+		}
+		else if (hitRight)
+		{
+			r->traverse(ray, triangles, intersection);
+		}
 	}
 	IntersectionData traverse(const Ray& ray, const std::vector<Triangle>& triangles)
 	{
@@ -283,6 +345,91 @@ public:
 	bool traverseVisible(const Ray& ray, const std::vector<Triangle>& triangles, const float maxT)
 	{
 		// Add visibility code here
+		float boxHitT;
+		if (bounds.rayAABB(ray, boxHitT) == false || boxHitT > maxT)
+		{
+			return true;
+		}
+		if (leaf)
+		{
+			for (unsigned int i = 0; i < num; ++i)
+			{
+				float t;
+				float u;
+				float v;
+				if (triangles[offset + i].rayIntersect(ray, t, u, v) && t < maxT)
+				{
+					return false;
+				}
+			}
+			return true;
+		}
+		if (l != NULL && l->traverseVisible(ray, triangles, maxT) == false)
+		{
+			return false;
+		}
+		if (r != NULL && r->traverseVisible(ray, triangles, maxT) == false)
+		{
+			return false;
+		}
 		return true;
+	}
+
+private:
+	static AABB computeBounds(const std::vector<Triangle>& inputTriangles, unsigned int begin, unsigned int end)
+	{
+		AABB aabb;
+		for (unsigned int i = begin; i < end; ++i)
+		{
+			aabb.extend(inputTriangles[i].vertices[0].p);
+			aabb.extend(inputTriangles[i].vertices[1].p);
+			aabb.extend(inputTriangles[i].vertices[2].p);
+		}
+		return aabb;
+	}
+	void buildRecursive(std::vector<Triangle>& inputTriangles, unsigned int begin, unsigned int end)
+	{
+		offset = begin;
+		num = end - begin;
+		bounds = computeBounds(inputTriangles, begin, end);
+
+		if (num <= MAXNODE_TRIANGLES)
+		{
+			leaf = true;
+			return;
+		}
+
+		AABB centroidBounds;
+		for (unsigned int i = begin; i < end; ++i)
+		{
+			centroidBounds.extend(inputTriangles[i].centre());
+		}
+		Vec3 extent = centroidBounds.max - centroidBounds.min;
+		int axis = 0;
+		if (extent.y > extent.x) axis = 1;
+		if (extent.z > extent.coords[axis]) axis = 2;
+		if (extent.coords[axis] < EPSILON)
+		{
+			leaf = true;
+			return;
+		}
+
+		const unsigned int mid = begin + ((end - begin) / 2);
+		std::nth_element(inputTriangles.begin() + begin, inputTriangles.begin() + mid, inputTriangles.begin() + end,
+			[axis](const Triangle& a, const Triangle& b)
+			{
+				return a.centre().coords[axis] < b.centre().coords[axis];
+			});
+		if (mid == begin || mid == end)
+		{
+			leaf = true;
+			return;
+		}
+
+		leaf = false;
+		l = new BVHNode();
+		r = new BVHNode();
+		l->buildRecursive(inputTriangles, begin, mid);
+		r->buildRecursive(inputTriangles, mid, end);
 	}
 };
