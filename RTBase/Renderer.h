@@ -28,7 +28,7 @@ public:
 	Scene* scene;
 	GamesEngineeringBase::Window* canvas;
 	Film* film;
-	MTRandom *samplers;
+	MTRandom* samplers;
 	int numProcs;
 	std::vector<std::thread> workers;
 	std::mutex workerMutex;
@@ -372,7 +372,7 @@ public:
 				}
 			}*/
 		}
-		
+
 	}
 	int getSPP()
 	{

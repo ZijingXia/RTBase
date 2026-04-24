@@ -200,6 +200,7 @@ void loadInstance(std::string sceneName, std::vector<Triangle>& meshTriangles, s
 	vecTransform = vecTransform.transpose();
 	for (int i = 0; i < meshes.size(); i++)
 	{
+		const int vertexOffset = (int)vertices.size();
 		for (int n = 0; n < meshes[i].verticesStatic.size(); n++)
 		{
 			Vertex v;
@@ -217,10 +218,11 @@ void loadInstance(std::string sceneName, std::vector<Triangle>& meshTriangles, s
 			v.v = meshes[i].verticesStatic[n].v;
 			vertices.push_back(v);
 		}
-		int offset = (int)indices.size();
+		//int offset = (int)indices.size();
 		for (int n = 0; n < meshes[i].indices.size(); n++)
 		{
-			indices.push_back(offset + meshes[i].indices[n]);
+			//indices.push_back(offset + meshes[i].indices[n]);
+			indices.push_back(vertexOffset + meshes[i].indices[n]);
 		}
 	}
 	for (int i = 0; i < indices.size(); i = i + 3) {

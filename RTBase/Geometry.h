@@ -259,7 +259,7 @@ public:
 	// This can store an offset and number of triangles in a global triangle list for example
 	// But you can store this however you want!
 	unsigned int offset;
-	unsigned char num;
+	unsigned int num;
 	bool leaf;
 	BVHNode()
 	{
