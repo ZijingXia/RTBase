@@ -39,7 +39,7 @@ public:
 	}
 	Colour evaluate(const Vec3& wi)
 	{
-		if (Dot(wi, triangle->gNormal()) < 0)
+		if (fabsf(Dot(wi, triangle->gNormal())) > 0.0f)
 		{
 			return emission;
 		}

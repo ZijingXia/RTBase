@@ -147,7 +147,7 @@ public:
 					continue;
 				}
 				Vec3 ln = light->normal(shadingData, wi);
-				float cosLight = std::max(0.0f, Dot(ln, -wi));
+				float cosLight = fabsf(Dot(ln, -wi));
 				if (cosLight <= 0.0f || lightPDF <= 0.0f)
 				{
 					continue;
@@ -331,6 +331,46 @@ public:
 					canvas->draw(x, y, r, g, b);
 				}
 			}
+
+			/*for (unsigned int y = 0; y < film->height; y++)
+			{
+				for (unsigned int x = 0; x < film->width; x++)
+				{
+					const unsigned int idx = ((y * film->width) + x) * 3;
+
+					float invSPP = 1.0f / (float)film->SPP;
+
+					float r = albedoAOV[idx] * invSPP;
+					float g = albedoAOV[idx + 1] * invSPP;
+					float b = albedoAOV[idx + 2] * invSPP;
+
+					unsigned char rc = (unsigned char)(std::min(1.0f, r) * 255.0f);
+					unsigned char gc = (unsigned char)(std::min(1.0f, g) * 255.0f);
+					unsigned char bc = (unsigned char)(std::min(1.0f, b) * 255.0f);
+
+					canvas->draw(x, y, rc, gc, bc);
+				}
+			}*/
+
+			/*for (unsigned int y = 0; y < film->height; y++)
+			{
+				for (unsigned int x = 0; x < film->width; x++)
+				{
+					const unsigned int idx = ((y * film->width) + x) * 3;
+
+					float invSPP = 1.0f / (float)film->SPP;
+
+					float r = normalAOV[idx] * invSPP;
+					float g = normalAOV[idx + 1] * invSPP;
+					float b = normalAOV[idx + 2] * invSPP;
+
+					unsigned char rc = (unsigned char)(std::min(1.0f, r) * 255.0f);
+					unsigned char gc = (unsigned char)(std::min(1.0f, g) * 255.0f);
+					unsigned char bc = (unsigned char)(std::min(1.0f, b) * 255.0f);
+
+					canvas->draw(x, y, rc, gc, bc);
+				}
+			}*/
 		}
 		
 	}
