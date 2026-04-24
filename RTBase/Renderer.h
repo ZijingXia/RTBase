@@ -188,7 +188,7 @@ public:
 		}
 		return Ld / (float)directSamples;
 	}
-	Colour pathTrace(Ray& r, const Colour& pathThroughput, int depth, Sampler* sampler)
+	Colour pathTrace(Ray& r, const Colour& pathThroughput, int depth, Sampler* sampler, Colour* normalOut = nullptr, Colour* albedoOut = nullptr)
 	{
 		// Add pathtracer code here
 		if (depth > 5)
@@ -198,9 +198,38 @@ public:
 		IntersectionData intersection = scene->traverse(r);
 		if (intersection.t == FLT_MAX)
 		{
+			if (depth == 0)
+			{
+				if (normalOut != nullptr)
+				{
+					*normalOut = Colour(0.0f, 0.0f, 0.0f);
+				}
+				if (albedoOut != nullptr)
+				{
+					*albedoOut = scene->background->evaluate(r.dir);
+				}
+			}
 			return pathThroughput * scene->background->evaluate(r.dir);
 		}
 		ShadingData shadingData = scene->calculateShadingData(intersection, r);
+		if (depth == 0)
+		{
+			if (normalOut != nullptr)
+			{
+				*normalOut = Colour(fabsf(shadingData.sNormal.x), fabsf(shadingData.sNormal.y), fabsf(shadingData.sNormal.z));
+			}
+			if (albedoOut != nullptr)
+			{
+				if (shadingData.bsdf->isLight())
+				{
+					*albedoOut = shadingData.bsdf->emit(shadingData, shadingData.wo);
+				}
+				else
+				{
+					*albedoOut = shadingData.bsdf->evaluate(shadingData, Vec3(0, 1, 0));
+				}
+			}
+		}
 		if (shadingData.bsdf->isLight())
 		{
 			return pathThroughput * shadingData.bsdf->emit(shadingData, shadingData.wo);
@@ -226,7 +255,7 @@ public:
 		}
 		Ray nextRay;
 		nextRay.init(shadingData.x + (wi * EPSILON), wi);
-		return L + pathTrace(nextRay, newThroughput, depth + 1, sampler);
+		return L + pathTrace(nextRay, newThroughput, depth + 1, sampler, normalOut, albedoOut);
 	}
 	Colour direct(Ray& r, Sampler* sampler)
 	{
@@ -368,9 +397,9 @@ private:
 				float py = y + samplers[threadID].next();
 				Ray ray = scene->camera.generateRay(px, py);
 
-				Colour col = pathTrace(ray, Colour(1.0f, 1.0f, 1.0f), 0, &samplers[threadID]);
-				Colour normal = viewNormals(ray);
-				Colour alb = albedo(ray);
+				Colour normal(0.0f, 0.0f, 0.0f);
+				Colour alb(0.0f, 0.0f, 0.0f);
+				Colour col = pathTrace(ray, Colour(1.0f, 1.0f, 1.0f), 0, &samplers[threadID], &normal, &alb);
 				const unsigned int idx = ((y * film->width) + x) * 3;
 				beautyAOV[idx] += col.r;
 				beautyAOV[idx + 1] += col.g;
