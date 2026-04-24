@@ -109,27 +109,42 @@ public:
 	{
 		IntersectionData intersection;
 		intersection.t = FLT_MAX;
-		for (int i = 0; i < triangles.size(); i++)
-		{
-			float t;
-			float u;
-			float v;
-			if (triangles[i].rayIntersect(ray, t, u, v))
-			{
-				if (t < intersection.t)
-				{
-					intersection.t = t;
-					intersection.ID = i;
-					intersection.alpha = u;
-					intersection.beta = v;
-					intersection.gamma = 1.0f - (u + v);
-				}
-			}
-		}
+		if (bvh != NULL)
+			return bvh->traverse(ray, triangles);
+
 		return intersection;
 	}
 	Light* sampleLight(Sampler* sampler, float& pmf)
 	{
+		if (lights.empty())
+		{
+			pmf = 0.0f;
+			return NULL;
+		}
+		float totalPower = 0.0f;
+		for (size_t i = 0; i < lights.size(); ++i)
+		{
+			totalPower += std::max(0.0f, lights[i]->totalIntegratedPower());
+		}
+		if (totalPower <= 0.0f)
+		{
+			const int lightIndex = std::min((int)lights.size() - 1, (int)(sampler->next() * (float)lights.size()));
+			pmf = 1.0f / (float)lights.size();
+			return lights[lightIndex];
+		}
+		const float target = sampler->next() * totalPower;
+		float accum = 0.0f;
+		for (size_t i = 0; i < lights.size(); ++i)
+		{
+			const float lightPower = std::max(0.0f, lights[i]->totalIntegratedPower());
+			accum += lightPower;
+			if (target <= accum || i == lights.size() - 1)
+			{
+				pmf = lightPower / totalPower;
+				return lights[i];
+			}
+		}
+		pmf = 0.0f;
 		return NULL;
 	}
 	// Do not modify any code below this line

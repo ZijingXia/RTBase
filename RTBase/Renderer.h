@@ -117,39 +117,74 @@ public:
 		}
 		// Compute direct lighting here
 		Colour Ld(0.0f, 0.0f, 0.0f);
-		const int directSamples = 4;
+		const int directSamples = 2;
 		for (int i = 0; i < directSamples; i++)
 		{
-			Vec3 wiLocal = SamplingDistributions::cosineSampleHemisphere(sampler->next(), sampler->next());
-			float pdf = SamplingDistributions::cosineHemispherePDF(wiLocal);
-			if (pdf <= 0.0f)
+			float lightPMF = 0.0f;
+			Light* light = scene->sampleLight(sampler, lightPMF);
+			if (light == NULL || lightPMF <= 0.0f)
 			{
 				continue;
 			}
-			Vec3 wi = shadingData.frame.toWorld(wiLocal);
+			Colour Le(0.0f, 0.0f, 0.0f);
+			float lightPDF = 0.0f;
+			Vec3 wi(0.0f, 1.0f, 0.0f);
+			float geometryTerm = 1.0f;
+			if (light->isArea())
+			{
+				Vec3 lightPos = light->sample(shadingData, sampler, Le, lightPDF);
+				Vec3 toLight = lightPos - shadingData.x;
+				float distSq = Dot(toLight, toLight);
+				if (distSq <= 0.0f)
+				{
+					continue;
+				}
+				float dist = sqrtf(distSq);
+				wi = toLight / dist;
+				float cosSurface = std::max(0.0f, Dot(shadingData.sNormal, wi));
+				if (cosSurface <= 0.0f)
+				{
+					continue;
+				}
+				Vec3 ln = light->normal(shadingData, wi);
+				float cosLight = std::max(0.0f, Dot(ln, -wi));
+				if (cosLight <= 0.0f || lightPDF <= 0.0f)
+				{
+					continue;
+				}
+				if (scene->visible(shadingData.x, lightPos) == false)
+				{
+					continue;
+				}
+				geometryTerm = cosLight / distSq;
+			}
+			else
+			{
+				wi = light->sample(shadingData, sampler, Le, lightPDF);
+				if (lightPDF <= 0.0f)
+				{
+					continue;
+				}
+				if (Dot(shadingData.sNormal, wi) <= 0.0f)
+				{
+					continue;
+				}
+				Ray shadowRay;
+				shadowRay.init(shadingData.x + (wi * EPSILON), wi);
+				IntersectionData occluder = scene->traverse(shadowRay);
+				if (occluder.t < FLT_MAX)
+				{
+					continue;
+				}
+			}
 			float cosTheta = std::max(0.0f, Dot(shadingData.sNormal, wi));
-			if (cosTheta <= 0.0f)
-			{
-				continue;
-			}
-			Ray shadowRay;
-			shadowRay.init(shadingData.x + (wi * EPSILON), wi);
-			IntersectionData hit = scene->traverse(shadowRay);
-			Colour Li = scene->background->evaluate(wi);
-			if (hit.t < FLT_MAX)
-			{
-				ShadingData lightSD = scene->calculateShadingData(hit, shadowRay);
-				if (lightSD.bsdf != NULL && lightSD.bsdf->isLight())
-				{
-					Li = lightSD.bsdf->emit(lightSD, -wi);
-				}
-				else
-				{
-					Li = Colour(0.0f, 0.0f, 0.0f);
-				}
-			}
 			Colour f = shadingData.bsdf->evaluate(shadingData, wi);
-			Ld = Ld + ((f * Li) * (cosTheta / pdf));
+			//Colour f(0.8f / 3.14159265f, 0.8f / 3.14159265f, 0.8f / 3.14159265f);
+			float pdf = lightPDF * lightPMF;
+			if (pdf > 0.0f)
+			{
+				Ld = Ld + ((f * Le) * ((cosTheta * geometryTerm) / pdf));
+			}
 		}
 		return Ld / (float)directSamples;
 	}
@@ -268,10 +303,7 @@ public:
 				}
 			}
 		}
-		if (denoiserEnabled && denoiseFailed == false)
-		{
-			runDenoiser();
-		}
+		
 	}
 	int getSPP()
 	{
@@ -332,8 +364,8 @@ private:
 		{
 			for (unsigned int x = x0; x < x1; x++)
 			{
-				float px = x + 0.5f;
-				float py = y + 0.5f;
+				float px = x + samplers[threadID].next();
+				float py = y + samplers[threadID].next();
 				Ray ray = scene->camera.generateRay(px, py);
 
 				Colour col = pathTrace(ray, Colour(1.0f, 1.0f, 1.0f), 0, &samplers[threadID]);
