@@ -6,6 +6,7 @@
 #include "Imaging.h"
 #include "Materials.h"
 #include "Lights.h"
+#include <algorithm>
 #include "Scene.h"
 #include "GamesEngineeringBase.h"
 #include <thread>
@@ -234,7 +235,11 @@ public:
 		{
 			return pathThroughput * shadingData.bsdf->emit(shadingData, shadingData.wo);
 		}
-		Colour L = pathThroughput * computeDirect(shadingData, sampler);
+		Colour L(0.0f, 0.0f, 0.0f);
+		if (depth == 0)
+		{
+			L = pathThroughput * computeDirect(shadingData, sampler);
+		}
 		Colour reflectedColour(0.0f, 0.0f, 0.0f);
 		float pdf = 0.0f;
 		Vec3 wi = shadingData.bsdf->sample(shadingData, sampler, reflectedColour, pdf);

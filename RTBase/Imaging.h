@@ -22,6 +22,7 @@ public:
 	int channels;
 	void loadDefault()
 	{
+		alpha = NULL;
 		width = 1;
 		height = 1;
 		channels = 3;
@@ -34,7 +35,7 @@ public:
 		if (filename.find(".hdr") != std::string::npos)
 		{
 			float* textureData = stbi_loadf(filename.c_str(), &width, &height, &channels, 0);
-			if (width == 0 || height == 0)
+			if (textureData == NULL || width == 0 || height == 0)
 			{
 				loadDefault();
 				return;
@@ -48,7 +49,7 @@ public:
 			return;
 		}
 		unsigned char* textureData = stbi_load(filename.c_str(), &width, &height, &channels, 0);
-		if (width == 0 || height == 0)
+		if (textureData == NULL || width == 0 || height == 0)
 		{
 			loadDefault();
 			return;
@@ -255,9 +256,9 @@ public:
 
 		Colour c = film[y * width + x] / (float)SPP;
 
-		c.r = std::max(0.0f, c.r);
-		c.g = std::max(0.0f, c.g);
-		c.b = std::max(0.0f, c.b);
+		c.r = std::isfinite(c.r) ? std::max(0.0f, c.r) : 0.0f;
+		c.g = std::isfinite(c.g) ? std::max(0.0f, c.g) : 0.0f;
+		c.b = std::isfinite(c.b) ? std::max(0.0f, c.b) : 0.0f;
 
 		c.r = c.r / (1.0f + c.r);
 		c.g = c.g / (1.0f + c.g);

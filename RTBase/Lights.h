@@ -4,6 +4,7 @@
 #include "Geometry.h"
 #include "Materials.h"
 #include "Sampling.h"
+#include <cmath>
 
 #pragma warning( disable : 4244)
 
@@ -131,9 +132,11 @@ class EnvironmentMap : public Light
 {
 public:
 	Texture* env;
+	float cachedIntegratedPower;
 	EnvironmentMap(Texture* _env)
 	{
 		env = _env;
+		cachedIntegratedPower = -1.0f;
 	}
 	Vec3 sample(const ShadingData& shadingData, Sampler* sampler, Colour& reflectedColour, float& pdf)
 	{
@@ -148,7 +151,8 @@ public:
 		float u = atan2f(wi.z, wi.x);
 		u = (u < 0.0f) ? u + (2.0f * M_PI) : u;
 		u = u / (2.0f * M_PI);
-		float v = acosf(wi.y) / M_PI;
+		float clampedY = std::max(-1.0f, std::min(1.0f, wi.y));
+		float v = acosf(clampedY) / M_PI;
 		return env->sample(u, v);
 	}
 	float PDF(const ShadingData& shadingData, const Vec3& wi)
@@ -166,7 +170,11 @@ public:
 	}
 	float totalIntegratedPower()
 	{
-		float total = 0;
+		if (cachedIntegratedPower >= 0.0f)
+		{
+			return cachedIntegratedPower;
+		}
+		float total = 0.0f;
 		for (int i = 0; i < env->height; i++)
 		{
 			float st = sinf(((float)i / (float)env->height) * M_PI);
@@ -176,7 +184,12 @@ public:
 			}
 		}
 		total = total / (float)(env->width * env->height);
-		return total * 4.0f * M_PI;
+		cachedIntegratedPower = total * 4.0f * M_PI;
+		if (std::isfinite(cachedIntegratedPower) == false || cachedIntegratedPower < 0.0f)
+		{
+			cachedIntegratedPower = 0.0f;
+		}
+		return cachedIntegratedPower;
 	}
 	Vec3 samplePositionFromLight(Sampler* sampler, float& pdf)
 	{
