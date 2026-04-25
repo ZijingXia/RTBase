@@ -320,7 +320,7 @@ public:
 		}
 		else
 		{
-			/*for (unsigned int y = 0; y < film->height; y++)
+			for (unsigned int y = 0; y < film->height; y++)
 			{
 				for (unsigned int x = 0; x < film->width; x++)
 				{
@@ -330,7 +330,7 @@ public:
 					film->tonemap(x, y, r, g, b);
 					canvas->draw(x, y, r, g, b);
 				}
-			}*/
+			}
 
 			/*for (unsigned int y = 0; y < film->height; y++)
 			{
@@ -352,7 +352,7 @@ public:
 				}
 			}*/
 
-			for (unsigned int y = 0; y < film->height; y++)
+			/*for (unsigned int y = 0; y < film->height; y++)
 			{
 				for (unsigned int x = 0; x < film->width; x++)
 				{
@@ -370,7 +370,8 @@ public:
 
 					canvas->draw(x, y, rc, gc, bc);
 				}
-			}
+			}*/
+
 		}
 
 	}

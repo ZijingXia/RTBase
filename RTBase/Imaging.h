@@ -123,7 +123,7 @@ public:
 		delete[] texels;
 		if (alpha != NULL)
 		{
-			delete alpha;
+			delete[] alpha;
 		}
 	}
 };
@@ -254,6 +254,10 @@ public:
 		}
 
 		Colour c = film[y * width + x] / (float)SPP;
+
+		c.r = std::max(0.0f, c.r);
+		c.g = std::max(0.0f, c.g);
+		c.b = std::max(0.0f, c.b);
 
 		c.r = c.r / (1.0f + c.r);
 		c.g = c.g / (1.0f + c.g);

@@ -274,6 +274,7 @@ Scene* loadScene(std::string sceneName)
 		loadInstance(sceneName, meshTriangles, meshMaterials, gemscene.instances[i], textureManager);
 	}
 	Light* background;
+	//background = new BackgroundColour(Colour(1.0f, 1.0f, 1.0f));
 	if (gemscene.findProperty("envmap").getValue("") != "")
 	{
 		Texture* env = loadTexture(sceneName + "/" + gemscene.findProperty("envmap").getValue(""), textureManager);
