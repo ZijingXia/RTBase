@@ -74,6 +74,7 @@ public:
 class Scene
 {
 public:
+	bool useBVH = true; // key to use BVH-------------------------------------------------------------------------
 	std::vector<Triangle> triangles;
 	std::vector<BSDF*> materials;
 	std::vector<Light*> lights;
@@ -109,10 +110,38 @@ public:
 	{
 		IntersectionData intersection;
 		intersection.t = FLT_MAX;
-		if (bvh != NULL)
+		if (useBVH && bvh != NULL)
+		{
 			return bvh->traverse(ray, triangles);
+		}
 
+		for (int i = 0; i < triangles.size(); i++)
+		{
+			float t;
+			float u;
+			float v;
+			if (triangles[i].rayIntersect(ray, t, u, v))
+			{
+				if (t < intersection.t)
+				{
+					intersection.t = t;
+					intersection.ID = i;
+					intersection.alpha = u;
+					intersection.beta = v;
+					intersection.gamma = 1.0f - (u + v);
+				}
+			}
+		}
 		return intersection;
+	}
+
+	void setBVHEnabled(bool enabled)
+	{
+		useBVH = enabled;
+	}
+	bool isBVHEnabled() const
+	{
+		return useBVH;
 	}
 	Light* sampleLight(Sampler* sampler, float& pmf)
 	{
@@ -174,8 +203,26 @@ public:
 		float maxT = dir.length() - (2.0f * EPSILON);
 		dir = dir.normalize();
 		ray.init(p1 + (dir * EPSILON), dir);
-		return bvh->traverseVisible(ray, triangles, maxT);
+
+		if (useBVH && bvh != NULL)
+		{
+			return bvh->traverseVisible(ray, triangles, maxT);
+		}
+
+		for (int i = 0; i < triangles.size(); i++)
+		{
+			float t;
+			float u;
+			float v;
+			if (triangles[i].rayIntersect(ray, t, u, v) && t < maxT)
+			{
+				return false;
+			}
+		}
+
+		return true;
 	}
+	
 	Colour emit(Triangle* light, ShadingData shadingData, Vec3 wi)
 	{
 		return materials[light->materialIndex]->emit(shadingData, wi);

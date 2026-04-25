@@ -26,7 +26,7 @@
 class RayTracer
 {
 public:
-	bool enableEnvironmentLight = true;
+	bool enableEnvironmentLight = true; // key to open envmap-------------------------------------------------
 	Scene* scene;
 	GamesEngineeringBase::Window* canvas;
 	Film* film;
@@ -41,12 +41,12 @@ public:
 	std::atomic<int> activeWorkers = 0;
 	bool stopWorkers = false;
 	int submittedFrameID = 0;
-	int denoiseIntervalSPP = 4;
+	int denoiseIntervalSPP = 4; // key to change dinoise fps-------------------------------------------------
 	std::vector<float> beautyAOV;
 	std::vector<float> normalAOV;
 	std::vector<float> albedoAOV;
 	std::vector<float> denoisedAOV;
-	bool denoiserEnabled = true;
+	bool denoiserEnabled = true; // key to open denoise-----------------------------------------------------
 	bool denoiseFailed = false;
 #if RTBASE_HAS_OIDN
 	oidn::DeviceRef oidnDevice;
@@ -652,7 +652,7 @@ private:
 		const char* errorMessage = nullptr;
 		if (oidnDevice.getError(errorMessage) != oidn::Error::None)
 		{
-			std::cout << "[OIDN] Error: " << errorMessage << std::endl;
+			std::cout << "OIDN Error: " << errorMessage << std::endl;
 			denoiseFailed = true;
 			return;
 		}
