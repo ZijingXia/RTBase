@@ -208,7 +208,7 @@ public:
 	}
 	Vec3 sample(const ShadingData& shadingData, Sampler* sampler, Colour& reflectedColour, float& pdf)
 	{
-		// Replace this with Mirror sampling code
+		// Replace this with Mirror sampling code ()
 		Vec3 wi = (shadingData.sNormal * (2.0f * Dot(shadingData.wo, shadingData.sNormal))) - shadingData.wo;
 		wi = wi.normalize();
 		pdf = 1.0f;
@@ -217,12 +217,12 @@ public:
 	}
 	Colour evaluate(const ShadingData& shadingData, const Vec3& wi)
 	{
-		// Replace this with Mirror evaluation code
+		// Replace this with Mirror evaluation code ()
 		return Colour(0.0f, 0.0f, 0.0f);
 	}
 	float PDF(const ShadingData& shadingData, const Vec3& wi)
 	{
-		// Replace this with Mirror PDF
+		// Replace this with Mirror PDF ()
 		return 0.0f;
 	}
 	bool isPureSpecular()
@@ -257,7 +257,7 @@ public:
 	}
 	Vec3 sample(const ShadingData& shadingData, Sampler* sampler, Colour& reflectedColour, float& pdf)
 	{
-		// Replace this with Conductor sampling code
+		// Replace this with Conductor sampling code (done)
 		Vec3 woLocal = shadingData.frame.toLocal(shadingData.wo);
 		float r1 = sampler->next();
 		float r2 = sampler->next();
@@ -286,7 +286,7 @@ public:
 	}
 	Colour evaluate(const ShadingData& shadingData, const Vec3& wi)
 	{
-		// Replace this with Conductor evaluation code
+		// Replace this with Conductor evaluation code (done)
 		Vec3 wiLocal = shadingData.frame.toLocal(wi);
 		Vec3 woLocal = shadingData.frame.toLocal(shadingData.wo);
 		float cosI = wiLocal.z;
@@ -308,7 +308,7 @@ public:
 	}
 	float PDF(const ShadingData& shadingData, const Vec3& wi)
 	{
-		// Replace this with Conductor PDF
+		// Replace this with Conductor PDF (done)
 		Vec3 wiLocal = shadingData.frame.toLocal(wi);
 		Vec3 woLocal = shadingData.frame.toLocal(shadingData.wo);
 		if (wiLocal.z <= 0.0f || woLocal.z <= 0.0f)
@@ -362,7 +362,8 @@ public:
 		float etaI = entering ? extIOR : intIOR;
 		float etaT = entering ? intIOR : extIOR;
 		float eta = etaI / etaT;
-		float cosThetaO = fabsf(woLocal.z);
+		float cosThetaO = woLocal.z;
+		float cosThetaOAbs = fabsf(woLocal.z);
 		float F = ShadingHelper::fresnelDielectric(cosThetaO, intIOR, extIOR);
 
 		Vec3 wiLocal;
@@ -373,7 +374,7 @@ public:
 		}
 		else
 		{
-			float sinThetaOSq = std::max(0.0f, 1.0f - (cosThetaO * cosThetaO));
+			float sinThetaOSq = std::max(0.0f, 1.0f - (cosThetaOAbs * cosThetaOAbs));
 			float sinThetaISq = eta * eta * sinThetaOSq;
 			if (sinThetaISq >= 1.0f)
 			{
@@ -393,11 +394,75 @@ public:
 	Colour evaluate(const ShadingData& shadingData, const Vec3& wi)
 	{
 		// Replace this with Glass evaluation code
+		Vec3 woLocal = shadingData.frame.toLocal(shadingData.wo);
+		Vec3 wiLocal = shadingData.frame.toLocal(wi);
+		if (fabsf(woLocal.z) <= 0.0f || fabsf(wiLocal.z) <= 0.0f)
+		{
+			return Colour(0.0f, 0.0f, 0.0f);
+		}
+		bool entering = woLocal.z > 0.0f;
+		float etaI = entering ? extIOR : intIOR;
+		float etaT = entering ? intIOR : extIOR;
+		float eta = etaI / etaT;
+		float cosThetaO = woLocal.z;
+		float cosThetaOAbs = fabsf(woLocal.z);
+		float F = ShadingHelper::fresnelDielectric(cosThetaO, intIOR, extIOR);
+		Vec3 wrLocal = Vec3(-woLocal.x, -woLocal.y, woLocal.z).normalize();
+		const float dirEps = 1.0e-4f;
+		if (Dot(wiLocal, wrLocal) > (1.0f - dirEps))
+		{
+			return (albedo->sample(shadingData.tu, shadingData.tv) * F) / std::max(EPSILON, fabsf(wiLocal.z));
+		}
+		float sinThetaOSq = std::max(0.0f, 1.0f - (cosThetaOAbs * cosThetaOAbs));
+		float sinThetaISq = eta * eta * sinThetaOSq;
+		if (sinThetaISq >= 1.0f)
+		{
+			return Colour(0.0f, 0.0f, 0.0f);
+		}
+		float cosThetaI = sqrtf(std::max(0.0f, 1.0f - sinThetaISq));
+		float sign = entering ? -1.0f : 1.0f;
+		Vec3 wtLocal = Vec3(-eta * woLocal.x, -eta * woLocal.y, sign * cosThetaI).normalize();
+		if (Dot(wiLocal, wtLocal) > (1.0f - dirEps))
+		{
+			return (albedo->sample(shadingData.tu, shadingData.tv) * (1.0f - F)) / std::max(EPSILON, fabsf(wiLocal.z));
+		}
 		return Colour(0.0f, 0.0f, 0.0f);
 	}
 	float PDF(const ShadingData& shadingData, const Vec3& wi)
 	{
 		// Replace this with GlassPDF
+		Vec3 woLocal = shadingData.frame.toLocal(shadingData.wo);
+		Vec3 wiLocal = shadingData.frame.toLocal(wi);
+		if (fabsf(woLocal.z) <= 0.0f || fabsf(wiLocal.z) <= 0.0f)
+		{
+			return 0.0f;
+		}
+		bool entering = woLocal.z > 0.0f;
+		float etaI = entering ? extIOR : intIOR;
+		float etaT = entering ? intIOR : extIOR;
+		float eta = etaI / etaT;
+		float cosThetaO = woLocal.z;
+		float cosThetaOAbs = fabsf(woLocal.z);
+		float F = ShadingHelper::fresnelDielectric(cosThetaO, intIOR, extIOR);
+		Vec3 wrLocal = Vec3(-woLocal.x, -woLocal.y, woLocal.z).normalize();
+		const float dirEps = 1.0e-4f;
+		if (Dot(wiLocal, wrLocal) > (1.0f - dirEps))
+		{
+			return F;
+		}
+		float sinThetaOSq = std::max(0.0f, 1.0f - (cosThetaOAbs * cosThetaOAbs));
+		float sinThetaISq = eta * eta * sinThetaOSq;
+		if (sinThetaISq >= 1.0f)
+		{
+			return 0.0f;
+		}
+		float cosThetaI = sqrtf(std::max(0.0f, 1.0f - sinThetaISq));
+		float sign = entering ? -1.0f : 1.0f;
+		Vec3 wtLocal = Vec3(-eta * woLocal.x, -eta * woLocal.y, sign * cosThetaI).normalize();
+		if (Dot(wiLocal, wtLocal) > (1.0f - dirEps))
+		{
+			return std::max(0.0f, 1.0f - F);
+		}
 		return 0.0f;
 	}
 	bool isPureSpecular()

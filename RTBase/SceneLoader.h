@@ -108,19 +108,20 @@ void loadInstance(std::string sceneName, std::vector<Triangle>& meshTriangles, s
 	loader.load(sceneName + "/" + instance.meshFilename, meshes);
 	// Add Material
 	BSDF* material = NULL;
-	if (instance.material.find("bsdf").getValue("") == "diffuse")
+	std::string bsdfType = instance.material.find("bsdf").getValue("");
+	if (bsdfType == "diffuse")
 	{
 		std::string filename = sceneName + "/" + instance.material.find("reflectance").getValue("");
 		material = new DiffuseBSDF(loadTexture(filename, textureManager));
 		meshMaterials.push_back(material);
 	}
-	if (instance.material.find("bsdf").getValue("") == "orennayar")
+	if (bsdfType == "orennayar")
 	{
 		std::string filename = sceneName + "/" + instance.material.find("reflectance").getValue("");
 		material = new OrenNayarBSDF(loadTexture(filename, textureManager), instance.material.find("alpha").getValue(1.0f));
 		meshMaterials.push_back(material);
 	}
-	if (instance.material.find("bsdf").getValue("") == "glass")
+	if (bsdfType == "glass")
 	{
 		std::string filename = sceneName + "/" + instance.material.find("reflectance").getValue("");
 		float intIOR = instance.material.find("intIOR").getValue(1.33f);
@@ -128,13 +129,13 @@ void loadInstance(std::string sceneName, std::vector<Triangle>& meshTriangles, s
 		material = new GlassBSDF(loadTexture(filename, textureManager), intIOR, extIOR);
 		meshMaterials.push_back(material);
 	}
-	if (instance.material.find("bsdf").getValue("") == "mirror")
+	if (bsdfType == "mirror")
 	{
 		std::string filename = sceneName + "/" + instance.material.find("reflectance").getValue("");
 		material = new MirrorBSDF(loadTexture(filename, textureManager));
 		meshMaterials.push_back(material);
 	}
-	if (instance.material.find("bsdf").getValue("") == "plastic")
+	if (bsdfType == "plastic")
 	{
 		std::string filename = sceneName + "/" + instance.material.find("reflectance").getValue("");
 		float intIOR = instance.material.find("intIOR").getValue(1.33f);
@@ -143,7 +144,7 @@ void loadInstance(std::string sceneName, std::vector<Triangle>& meshTriangles, s
 		material = new PlasticBSDF(loadTexture(filename, textureManager), intIOR, extIOR, roughness);
 		meshMaterials.push_back(material);
 	}
-	if (instance.material.find("bsdf").getValue("") == "dielectric")
+	if (bsdfType == "dielectric")
 	{
 		std::string filename = sceneName + "/" + instance.material.find("reflectance").getValue("");
 		float intIOR = instance.material.find("intIOR").getValue(1.33f);
@@ -158,7 +159,7 @@ void loadInstance(std::string sceneName, std::vector<Triangle>& meshTriangles, s
 		}
 		meshMaterials.push_back(material);
 	}
-	if (instance.material.find("bsdf").getValue("") == "conductor")
+	if (bsdfType == "conductor")
 	{
 		std::string filename = sceneName + "/" + instance.material.find("reflectance").getValue("");
 		Colour eta;
@@ -167,6 +168,13 @@ void loadInstance(std::string sceneName, std::vector<Triangle>& meshTriangles, s
 		instance.material.find("k").getValuesAsVector3(k.r, k.g, k.b);
 		float roughness = instance.material.find("roughness").getValue(1.0f);
 		material = new ConductorBSDF(loadTexture(filename, textureManager), eta, k, roughness);
+		meshMaterials.push_back(material);
+	}
+	if (bsdfType == "ggx" || bsdfType == "ggxmicrofacet" || bsdfType == "microfacet")
+	{
+		std::string filename = sceneName + "/" + instance.material.find("reflectance").getValue("");
+		float roughness = instance.material.find("roughness").getValue(1.0f);
+		material = new GGXMicrofacetBSDF(loadTexture(filename, textureManager), roughness);
 		meshMaterials.push_back(material);
 	}
 	if (instance.material.find("emission").getValue("") != "")
