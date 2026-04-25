@@ -133,16 +133,40 @@ class EnvironmentMap : public Light
 public:
 	Texture* env;
 	float cachedIntegratedPower;
+	std::vector<float> distribution;
+	std::vector<float> cdf;
+	float totalWeight = 0.0f;
 	EnvironmentMap(Texture* _env)
 	{
 		env = _env;
 		cachedIntegratedPower = -1.0f;
+		buildDistribution();
+	}
+	void buildDistribution()
+	{
+		const int texelCount = env->width * env->height;
+		distribution.assign(texelCount, 0.0f);
+		cdf.assign(texelCount, 0.0f);
+		totalWeight = 0.0f;
+		for (int y = 0; y < env->height; y++)
+		{
+			const float v = ((float)y + 0.5f) / (float)env->height;
+			const float theta = v * M_PI;
+			const float sinTheta = sinf(theta);
+			for (int x = 0; x < env->width; x++)
+			{
+				const int idx = (y * env->width) + x;
+				const float w = std::max(0.0f, env->texels[idx].Lum() * sinTheta);
+				distribution[idx] = w;
+				totalWeight += w;
+				cdf[idx] = totalWeight;
+			}
+		}
 	}
 	Vec3 sample(const ShadingData& shadingData, Sampler* sampler, Colour& reflectedColour, float& pdf)
 	{
 		// Assignment: Update this code to importance sampling lighting based on luminance of each pixel
-		Vec3 wi = SamplingDistributions::uniformSampleSphere(sampler->next(), sampler->next());
-		pdf = SamplingDistributions::uniformSpherePDF(wi);
+		Vec3 wi = sampleDirectionFromLight(sampler, pdf);
 		reflectedColour = evaluate(wi);
 		return wi;
 	}
@@ -158,7 +182,26 @@ public:
 	float PDF(const ShadingData& shadingData, const Vec3& wi)
 	{
 		// Assignment: Update this code to return the correct PDF of luminance weighted importance sampling
-		return SamplingDistributions::uniformSpherePDF(wi);
+		if (totalWeight <= 0.0f || env->width <= 0 || env->height <= 0)
+		{
+			return SamplingDistributions::uniformSpherePDF(wi);
+		}
+		float u = atan2f(wi.z, wi.x);
+		u = (u < 0.0f) ? u + (2.0f * M_PI) : u;
+		u = u / (2.0f * M_PI);
+		float clampedY = std::max(-1.0f, std::min(1.0f, wi.y));
+		float v = acosf(clampedY) / M_PI;
+		int x = std::min(env->width - 1, std::max(0, (int)(u * env->width)));
+		int y = std::min(env->height - 1, std::max(0, (int)(v * env->height)));
+		const int idx = (y * env->width) + x;
+		const float texelProb = distribution[idx] / totalWeight;
+		const float sinTheta = sqrtf(std::max(0.0f, 1.0f - (clampedY * clampedY)));
+		if (sinTheta <= 0.0f)
+		{
+			return 0.0f;
+		}
+		const float pdfUV = texelProb * (float)(env->width * env->height);
+		return pdfUV / (2.0f * M_PI * M_PI * sinTheta);
 	}
 	bool isArea()
 	{
@@ -203,8 +246,32 @@ public:
 	Vec3 sampleDirectionFromLight(Sampler* sampler, float& pdf)
 	{
 		// Replace this tabulated sampling of environment maps
-		Vec3 wi = SamplingDistributions::uniformSampleSphere(sampler->next(), sampler->next());
-		pdf = SamplingDistributions::uniformSpherePDF(wi);
+		if (totalWeight <= 0.0f || cdf.empty())
+		{
+			Vec3 wi = SamplingDistributions::uniformSampleSphere(sampler->next(), sampler->next());
+			pdf = SamplingDistributions::uniformSpherePDF(wi);
+			return wi;
+		}
+		const float target = sampler->next() * totalWeight;
+		int idx = (int)(std::lower_bound(cdf.begin(), cdf.end(), target) - cdf.begin());
+		if (idx < 0)
+		{
+			idx = 0;
+		}
+		if (idx >= (int)cdf.size())
+		{
+			idx = (int)cdf.size() - 1;
+		}
+		const int y = idx / env->width;
+		const int x = idx % env->width;
+		const float u = ((float)x + sampler->next()) / (float)env->width;
+		const float v = ((float)y + sampler->next()) / (float)env->height;
+		const float phi = u * 2.0f * M_PI;
+		const float theta = v * M_PI;
+		const float sinTheta = sinf(theta);
+		const float cosTheta = cosf(theta);
+		Vec3 wi(cosf(phi) * sinTheta, cosTheta, sinf(phi) * sinTheta);
+		pdf = PDF(ShadingData(), wi);
 		return wi;
 	}
 };

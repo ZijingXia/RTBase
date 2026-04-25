@@ -26,6 +26,7 @@
 class RayTracer
 {
 public:
+	bool enableEnvironmentLight = true;
 	Scene* scene;
 	GamesEngineeringBase::Window* canvas;
 	Film* film;
@@ -119,6 +120,42 @@ public:
 		// Compute direct lighting here
 		Colour Ld(0.0f, 0.0f, 0.0f);
 		const int directSamples = 2;
+
+		auto powerHeuristic = [](float pdfA, float pdfB) -> float
+			{
+				float a2 = pdfA * pdfA;
+				float b2 = pdfB * pdfB;
+				float d = a2 + b2;
+				if (d <= 0.0f)
+				{
+					return 0.0f;
+				}
+				return a2 / d;
+			};
+		auto lightSelectionPMF = [&](Light* target) -> float
+			{
+				if (target == NULL || scene->lights.empty())
+				{
+					return 0.0f;
+				}
+				float totalPower = 0.0f;
+				float targetPower = 0.0f;
+				for (size_t l = 0; l < scene->lights.size(); ++l)
+				{
+					float p = std::max(0.0f, scene->lights[l]->totalIntegratedPower());
+					totalPower += p;
+					if (scene->lights[l] == target)
+					{
+						targetPower = p;
+					}
+				}
+				if (totalPower <= 0.0f)
+				{
+					return 1.0f / (float)scene->lights.size();
+				}
+				return targetPower / totalPower;
+			};
+
 		for (int i = 0; i < directSamples; i++)
 		{
 			float lightPMF = 0.0f;
@@ -130,7 +167,8 @@ public:
 			Colour Le(0.0f, 0.0f, 0.0f);
 			float lightPDF = 0.0f;
 			Vec3 wi(0.0f, 1.0f, 0.0f);
-			float geometryTerm = 1.0f;
+			//float geometryTerm = 1.0f;
+			float lightPdfW = 0.0f;
 			if (light->isArea())
 			{
 				Vec3 lightPos = light->sample(shadingData, sampler, Le, lightPDF);
@@ -157,7 +195,8 @@ public:
 				{
 					continue;
 				}
-				geometryTerm = cosLight / distSq;
+				//geometryTerm = cosLight / distSq;
+				lightPdfW = lightPDF * (distSq / std::max(EPSILON, cosLight));
 			}
 			else
 			{
@@ -177,15 +216,86 @@ public:
 				{
 					continue;
 				}
+				lightPdfW = lightPDF;
 			}
 			float cosTheta = std::max(0.0f, Dot(shadingData.sNormal, wi));
 			Colour f = shadingData.bsdf->evaluate(shadingData, wi);
 			//Colour f(0.8f / 3.14159265f, 0.8f / 3.14159265f, 0.8f / 3.14159265f);
-			float pdf = lightPDF * lightPMF;
-			if (pdf > 0.0f)
+			float lightPathPdf = lightPdfW * lightPMF;
+			if (lightPathPdf > 0.0f)
 			{
-				Ld = Ld + ((f * Le) * ((cosTheta * geometryTerm) / pdf));
+				float bsdfPdf = shadingData.bsdf->PDF(shadingData, wi);
+				float wLight = powerHeuristic(lightPathPdf, bsdfPdf);
+				Ld = Ld + ((f * Le) * ((cosTheta * wLight) / lightPathPdf));
 			}
+			Colour bsdfReflected(0.0f, 0.0f, 0.0f);
+			float bsdfPdf = 0.0f;
+			Vec3 bsdfWi = shadingData.bsdf->sample(shadingData, sampler, bsdfReflected, bsdfPdf);
+			if (bsdfPdf <= 0.0f)
+			{
+				continue;
+			}
+			float bsdfCos = std::max(0.0f, Dot(shadingData.sNormal, bsdfWi));
+			if (bsdfCos <= 0.0f)
+			{
+				continue;
+			}
+			Ray bsdfRay;
+			bsdfRay.init(shadingData.x + (bsdfWi * EPSILON), bsdfWi);
+			IntersectionData hit = scene->traverse(bsdfRay);
+			Colour bsdfLe(0.0f, 0.0f, 0.0f);
+			Light* hitLight = NULL;
+			if (hit.t == FLT_MAX)
+			{
+				if (enableEnvironmentLight == false)
+				{
+					continue;
+				}
+
+				bsdfLe = scene->background->evaluate(bsdfWi);
+				hitLight = scene->background;
+			}
+			else
+			{
+				ShadingData hitShading = scene->calculateShadingData(hit, bsdfRay);
+				if (hitShading.bsdf->isLight() == false)
+				{
+					continue;
+				}
+				bsdfLe = hitShading.bsdf->emit(hitShading, hitShading.wo);
+				for (size_t l = 0; l < scene->lights.size(); ++l)
+				{
+					AreaLight* area = dynamic_cast<AreaLight*>(scene->lights[l]);
+					if (area != NULL && area->triangle == &scene->triangles[hit.ID])
+					{
+						hitLight = scene->lights[l];
+						break;
+					}
+				}
+				if (hitLight == NULL)
+				{
+					continue;
+				}
+			}
+			float hitLightPMF = lightSelectionPMF(hitLight);
+			float hitLightPdfW = hitLight->PDF(shadingData, bsdfWi);
+			if (hitLight->isArea())
+			{
+				Vec3 lightPoint = bsdfRay.at(hit.t);
+				Vec3 toLight = lightPoint - shadingData.x;
+				float distSq = Dot(toLight, toLight);
+				Vec3 ln = hitLight->normal(shadingData, bsdfWi);
+				float cosLight = fabsf(Dot(ln, -bsdfWi));
+				if (cosLight <= 0.0f)
+				{
+					continue;
+				}
+				hitLightPdfW = hitLightPdfW * (distSq / std::max(EPSILON, cosLight));
+			}
+			float hitLightPathPdf = hitLightPMF * hitLightPdfW;
+			float wBSDF = powerHeuristic(bsdfPdf, hitLightPathPdf);
+			Colour bsdfF = shadingData.bsdf->evaluate(shadingData, bsdfWi);
+			Ld = Ld + ((bsdfF * bsdfLe) * ((bsdfCos * wBSDF) / bsdfPdf));
 		}
 		return Ld / (float)directSamples;
 	}
@@ -207,10 +317,23 @@ public:
 				}
 				if (albedoOut != nullptr)
 				{
-					*albedoOut = scene->background->evaluate(r.dir);
+					if (enableEnvironmentLight)
+					{
+						*albedoOut = scene->background->evaluate(r.dir);
+					}
+					else
+					{
+						*albedoOut = Colour(0.0f, 0.0f, 0.0f);
+					}
 				}
 			}
-			return pathThroughput * scene->background->evaluate(r.dir);
+
+			if (enableEnvironmentLight)
+			{
+				return pathThroughput * scene->background->evaluate(r.dir);
+			}
+
+			return Colour(0.0f, 0.0f, 0.0f);
 		}
 		ShadingData shadingData = scene->calculateShadingData(intersection, r);
 		if (depth == 0)
@@ -236,7 +359,7 @@ public:
 			return pathThroughput * shadingData.bsdf->emit(shadingData, shadingData.wo);
 		}
 		Colour L(0.0f, 0.0f, 0.0f);
-		if (depth == 0)
+		if (shadingData.bsdf->isPureSpecular() == false)
 		{
 			L = pathThroughput * computeDirect(shadingData, sampler);
 		}
