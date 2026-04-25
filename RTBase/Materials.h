@@ -253,7 +253,7 @@ public:
 		albedo = _albedo;
 		eta = _eta;
 		k = _k;
-		alpha = 1.62142f * sqrtf(roughness);
+		alpha = std::max(0.001f, 1.62142f * sqrtf(roughness));
 	}
 	Vec3 sample(const ShadingData& shadingData, Sampler* sampler, Colour& reflectedColour, float& pdf)
 	{
@@ -424,7 +424,7 @@ public:
 	GGXMicrofacetBSDF(Texture* _albedo, float roughness)
 	{
 		albedo = _albedo;
-		alpha = 1.62142f * sqrtf(roughness);
+		alpha = std::max(0.001f, 1.62142f * sqrtf(roughness));
 	}
 	Vec3 sample(const ShadingData& shadingData, Sampler* sampler, Colour& reflectedColour, float& pdf)
 	{
@@ -520,7 +520,7 @@ public:
 		albedo = _albedo;
 		intIOR = _intIOR;
 		extIOR = _extIOR;
-		alpha = 1.62142f * sqrtf(roughness);
+		alpha = std::max(0.001f, 1.62142f * sqrtf(roughness));
 	}
 	Vec3 sample(const ShadingData& shadingData, Sampler* sampler, Colour& reflectedColour, float& pdf)
 	{
@@ -770,7 +770,7 @@ public:
 		albedo = _albedo;
 		intIOR = _intIOR;
 		extIOR = _extIOR;
-		alpha = 1.62142f * sqrtf(roughness);
+		alpha = std::max(0.001f, 1.62142f * sqrtf(roughness));
 	}
 	float alphaToPhongExponent()
 	{
