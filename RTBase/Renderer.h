@@ -41,7 +41,7 @@ public:
 	std::atomic<int> activeWorkers = 0;
 	bool stopWorkers = false;
 	int submittedFrameID = 0;
-	int denoiseIntervalSPP = 8;
+	int denoiseIntervalSPP = 10;
 	std::vector<float> beautyAOV;
 	std::vector<float> normalAOV;
 	std::vector<float> albedoAOV;
@@ -80,6 +80,12 @@ public:
 #if RTBASE_HAS_OIDN
 		oidnDevice = oidn::newDevice();
 		oidnDevice.commit();
+#endif
+
+#if RTBASE_HAS_OIDN
+		std::cout << "OIDN Enabled" << std::endl;
+#else
+		std::cout << "OIDN NOT found" << std::endl;
 #endif
 
 		clear();
@@ -319,7 +325,7 @@ public:
 				{
 					if (enableEnvironmentLight)
 					{
-						*albedoOut = scene->background->evaluate(r.dir);
+						*albedoOut = Colour(0.0f, 0.0f, 0.0f);
 					}
 					else
 					{
@@ -340,13 +346,13 @@ public:
 		{
 			if (normalOut != nullptr)
 			{
-				*normalOut = Colour(fabsf(shadingData.sNormal.x), fabsf(shadingData.sNormal.y), fabsf(shadingData.sNormal.z));
+				*normalOut = Colour(shadingData.sNormal.x, shadingData.sNormal.y, shadingData.sNormal.z);
 			}
 			if (albedoOut != nullptr)
 			{
 				if (shadingData.bsdf->isLight())
 				{
-					*albedoOut = shadingData.bsdf->emit(shadingData, shadingData.wo);
+					*albedoOut = Colour(0.0f, 0.0f, 0.0f);
 				}
 				else
 				{
@@ -444,6 +450,7 @@ public:
 		}
 		if (denoiserEnabled && denoiseFailed == false && (film->SPP % denoiseIntervalSPP == 0))
 		{
+			std::cout << "OIDN Running at SPP = " << film->SPP << std::endl;
 			runDenoiser();
 		}
 		else
@@ -626,6 +633,9 @@ private:
 			{
 				const unsigned int idx = ((y * film->width) + x) * 3;
 				Colour c(denoisedAOV[idx], denoisedAOV[idx + 1], denoisedAOV[idx + 2]);
+				if (isfinite(c.r) == false) c.r = 0.0f;
+				if (isfinite(c.g) == false) c.g = 0.0f;
+				if (isfinite(c.b) == false) c.b = 0.0f;
 				unsigned char r = (unsigned char)(std::min(1.0f, std::max(0.0f, c.r / (1.0f + c.r))) * 255.0f);
 				unsigned char g = (unsigned char)(std::min(1.0f, std::max(0.0f, c.g / (1.0f + c.g))) * 255.0f);
 				unsigned char b = (unsigned char)(std::min(1.0f, std::max(0.0f, c.b / (1.0f + c.b))) * 255.0f);
