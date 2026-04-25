@@ -41,7 +41,7 @@ public:
 	std::atomic<int> activeWorkers = 0;
 	bool stopWorkers = false;
 	int submittedFrameID = 0;
-	int denoiseIntervalSPP = 10;
+	int denoiseIntervalSPP = 4;
 	std::vector<float> beautyAOV;
 	std::vector<float> normalAOV;
 	std::vector<float> albedoAOV;
@@ -606,47 +606,94 @@ private:
 		{
 			return;
 		}
+
 		const float invSPP = 1.0f / (float)film->SPP;
-		for (size_t i = 0; i < beautyAOV.size(); ++i)
+
+		std::vector<float> beautyInput = beautyAOV;
+		std::vector<float> normalInput = normalAOV;
+		std::vector<float> albedoInput = albedoAOV;
+
+		for (size_t i = 0; i < beautyInput.size(); ++i)
 		{
-			beautyAOV[i] *= invSPP;
-			normalAOV[i] *= invSPP;
-			albedoAOV[i] *= invSPP;
+			beautyInput[i] *= invSPP;
+			normalInput[i] *= invSPP;
+			albedoInput[i] *= invSPP;
+
+			if (!std::isfinite(beautyInput[i])) beautyInput[i] = 0.0f;
+			if (!std::isfinite(normalInput[i])) normalInput[i] = 0.0f;
+			if (!std::isfinite(albedoInput[i])) albedoInput[i] = 0.0f;
+
+			beautyInput[i] = std::max(0.0f, beautyInput[i]);
+			albedoInput[i] = std::max(0.0f, albedoInput[i]);
 		}
+
+		const size_t bytes = beautyInput.size() * sizeof(float);
+
+		oidn::BufferRef colorBuf = oidnDevice.newBuffer(bytes);
+		oidn::BufferRef normalBuf = oidnDevice.newBuffer(bytes);
+		oidn::BufferRef albedoBuf = oidnDevice.newBuffer(bytes);
+		oidn::BufferRef outputBuf = oidnDevice.newBuffer(bytes);
+
+		colorBuf.write(0, bytes, beautyInput.data());
+		normalBuf.write(0, bytes, normalInput.data());
+		albedoBuf.write(0, bytes, albedoInput.data());
+
 		oidn::FilterRef filter = oidnDevice.newFilter("RT");
-		filter.setImage("color", beautyAOV.data(), oidn::Format::Float3, film->width, film->height);
-		filter.setImage("normal", normalAOV.data(), oidn::Format::Float3, film->width, film->height);
-		filter.setImage("albedo", albedoAOV.data(), oidn::Format::Float3, film->width, film->height);
-		filter.setImage("output", denoisedAOV.data(), oidn::Format::Float3, film->width, film->height);
+
+		filter.setImage("color", colorBuf, oidn::Format::Float3, film->width, film->height);
+		filter.setImage("normal", normalBuf, oidn::Format::Float3, film->width, film->height);
+		filter.setImage("albedo", albedoBuf, oidn::Format::Float3, film->width, film->height);
+		filter.setImage("output", outputBuf, oidn::Format::Float3, film->width, film->height);
+
 		filter.set("hdr", true);
 		filter.commit();
 		filter.execute();
-		const char* errorMessage;
+
+		const char* errorMessage = nullptr;
 		if (oidnDevice.getError(errorMessage) != oidn::Error::None)
 		{
+			std::cout << "[OIDN] Error: " << errorMessage << std::endl;
 			denoiseFailed = true;
 			return;
 		}
+
+		outputBuf.read(0, bytes, denoisedAOV.data());
+
 		for (unsigned int y = 0; y < film->height; ++y)
 		{
 			for (unsigned int x = 0; x < film->width; ++x)
 			{
 				const unsigned int idx = ((y * film->width) + x) * 3;
-				Colour c(denoisedAOV[idx], denoisedAOV[idx + 1], denoisedAOV[idx + 2]);
-				if (isfinite(c.r) == false) c.r = 0.0f;
-				if (isfinite(c.g) == false) c.g = 0.0f;
-				if (isfinite(c.b) == false) c.b = 0.0f;
-				unsigned char r = (unsigned char)(std::min(1.0f, std::max(0.0f, c.r / (1.0f + c.r))) * 255.0f);
-				unsigned char g = (unsigned char)(std::min(1.0f, std::max(0.0f, c.g / (1.0f + c.g))) * 255.0f);
-				unsigned char b = (unsigned char)(std::min(1.0f, std::max(0.0f, c.b / (1.0f + c.b))) * 255.0f);
+
+				Colour c(
+					denoisedAOV[idx],
+					denoisedAOV[idx + 1],
+					denoisedAOV[idx + 2]
+				);
+
+				if (!std::isfinite(c.r)) c.r = 0.0f;
+				if (!std::isfinite(c.g)) c.g = 0.0f;
+				if (!std::isfinite(c.b)) c.b = 0.0f;
+
+				c.r = std::max(0.0f, c.r);
+				c.g = std::max(0.0f, c.g);
+				c.b = std::max(0.0f, c.b);
+
+				c.r = c.r / (1.0f + c.r);
+				c.g = c.g / (1.0f + c.g);
+				c.b = c.b / (1.0f + c.b);
+
+				float invGamma = 1.0f / 2.2f;
+				c.r = powf(c.r, invGamma);
+				c.g = powf(c.g, invGamma);
+				c.b = powf(c.b, invGamma);
+
+				unsigned char r = (unsigned char)(std::min(1.0f, c.r) * 255.0f);
+				unsigned char g = (unsigned char)(std::min(1.0f, c.g) * 255.0f);
+				unsigned char b = (unsigned char)(std::min(1.0f, c.b) * 255.0f);
+
 				canvas->draw(x, y, r, g, b);
 			}
-		}
-		for (size_t i = 0; i < beautyAOV.size(); ++i)
-		{
-			beautyAOV[i] /= invSPP;
-			normalAOV[i] /= invSPP;
-			albedoAOV[i] /= invSPP;
 		}
 #else
 		denoiseFailed = true;
