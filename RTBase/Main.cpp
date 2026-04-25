@@ -281,9 +281,9 @@ int main(int argc, char *argv[])
 	//return 0;
 	
 	// Initialize default parameters
-	std::string sceneName = "bathroom";
+	std::string sceneName = "glass-of-water";
 	std::string filename = "GI.hdr";
-	unsigned int SPP = 512;
+	unsigned int SPP = 8196;
 
 	if (argc > 1)
 	{
