@@ -53,10 +53,10 @@ public:
 	bool enableInstantRadiosity = false;
 	bool enablePathTracing = true;
 	bool enableRecursiveBounce = true;
-	int lightTracingPathsPerFrame = 8196;
-	int instantRadiosityLightPaths = 4096;
-	int instantRadiosityMaxVPL = 4096;
-	int instantRadiosityVPLSamplesPerHit = 64;
+	int lightTracingPathsPerFrame = 100000;
+	int instantRadiosityLightPaths = 1024;
+	int instantRadiosityMaxVPL = 512;
+	int instantRadiosityVPLSamplesPerHit = 16;
 	
 #if RTBASE_HAS_OIDN
 	oidn::DeviceRef oidnDevice;
@@ -880,9 +880,19 @@ private:
 				Colour normal(0.0f, 0.0f, 0.0f);
 				Colour alb(0.0f, 0.0f, 0.0f);
 				Colour col(0.0f, 0.0f, 0.0f);
-				if (enableRecursiveBounce)
+				if (enablePathTracing)
 				{
 					col = pathTrace(ray, Colour(1.0f, 1.0f, 1.0f), 0, &samplers[threadID], &normal, &alb);
+				}
+				else if (enableInstantRadiosity)
+				{
+					col = cameraLite(ray, &samplers[threadID], &normal, &alb);
+				}
+				else if (enableLightTracing)
+				{
+					col = Colour(0.0f, 0.0f, 0.0f);
+					normal = Colour(0.0f, 0.0f, 0.0f);
+					alb = Colour(0.0f, 0.0f, 0.0f);
 				}
 				else
 				{
