@@ -16,7 +16,8 @@
 #include <chrono>
 #include <mutex>
 #include <condition_variable>
-#if __has_include(<OpenImageDenoise/oidn.hpp>)
+
+#if __has_include(<OpenImageDenoise/oidn.hpp>) // just test whether the path is right
 #include <OpenImageDenoise/oidn.hpp>
 #define RTBASE_HAS_OIDN 1
 #else
@@ -41,13 +42,20 @@ public:
 	std::atomic<int> activeWorkers = 0;
 	bool stopWorkers = false;
 	int submittedFrameID = 0;
-	int denoiseIntervalSPP = 4; // key to change dinoise fps-------------------------------------------------
+	int denoiseIntervalSPP = 100; // key to change dinoise fps-------------------------------------------------
 	std::vector<float> beautyAOV;
 	std::vector<float> normalAOV;
 	std::vector<float> albedoAOV;
 	std::vector<float> denoisedAOV;
 	bool denoiserEnabled = true; // key to open denoise-----------------------------------------------------
 	bool denoiseFailed = false;
+	bool enableLightTracing = false;
+	bool enableInstantRadiosity = false;
+	int lightTracingPathsPerFrame = 1024;
+	int instantRadiosityLightPaths = 128;
+	int instantRadiosityMaxVPL = 512;
+	int instantRadiosityVPLSamplesPerHit = 8;
+	
 #if RTBASE_HAS_OIDN
 	oidn::DeviceRef oidnDevice;
 #endif
@@ -77,6 +85,7 @@ public:
 		normalAOV.resize(pixelCount * 3, 0.0f);
 		albedoAOV.resize(pixelCount * 3, 0.0f);
 		denoisedAOV.resize(pixelCount * 3, 0.0f);
+
 #if RTBASE_HAS_OIDN
 		oidnDevice = oidn::newDevice();
 		oidnDevice.commit();
@@ -368,6 +377,10 @@ public:
 		if (shadingData.bsdf->isPureSpecular() == false)
 		{
 			L = pathThroughput * computeDirect(shadingData, sampler);
+			if (enableInstantRadiosity && depth == 0)
+			{
+				L = L + (pathThroughput * connectToVPLs(shadingData, sampler));
+			}
 		}
 		Colour reflectedColour(0.0f, 0.0f, 0.0f);
 		float pdf = 0.0f;
@@ -433,6 +446,18 @@ public:
 	void render()
 	{
 		film->incrementSPP();
+		if (enableInstantRadiosity)
+		{
+			buildInstantRadiosityVPLs(&samplers[0]);
+		}
+		else
+		{
+			instantRadiosityVPLs.clear();
+		}
+		if (enableLightTracing)
+		{
+			runLightTracingPass(&samplers[0]);
+		}
 		const unsigned int tileSize = 16;
 		const unsigned int tilesX = (film->width + tileSize - 1) / tileSize;
 		const unsigned int tilesY = (film->height + tileSize - 1) / tileSize;
@@ -524,6 +549,198 @@ public:
 	}
 
 private:
+	struct VirtualPointLight
+	{
+		Vec3 x;
+		Vec3 n;
+		Colour flux;
+	};
+	std::vector<VirtualPointLight> instantRadiosityVPLs;
+
+	Colour connectToVPLs(const ShadingData& shadingData, Sampler* sampler)
+	{
+		if (instantRadiosityVPLs.empty() || shadingData.bsdf->isPureSpecular())
+		{
+			return Colour(0.0f, 0.0f, 0.0f);
+		}
+		const int maxSamples = std::min((int)instantRadiosityVPLs.size(), std::max(1, instantRadiosityVPLSamplesPerHit));
+		Colour L(0.0f, 0.0f, 0.0f);
+		for (int i = 0; i < maxSamples; ++i)
+		{
+			const int idx = std::min((int)instantRadiosityVPLs.size() - 1, (int)(sampler->next() * (float)instantRadiosityVPLs.size()));
+			const VirtualPointLight& vpl = instantRadiosityVPLs[idx];
+			Vec3 toVPL = vpl.x - shadingData.x;
+			float distSq = Dot(toVPL, toVPL);
+			if (distSq <= EPSILON)
+			{
+				continue;
+			}
+			float dist = sqrtf(distSq);
+			Vec3 wi = toVPL / dist;
+			float cosSurface = std::max(0.0f, Dot(shadingData.sNormal, wi));
+			float cosVPL = std::max(0.0f, Dot(vpl.n, -wi));
+			if (cosSurface <= 0.0f || cosVPL <= 0.0f)
+			{
+				continue;
+			}
+			if (!scene->visible(shadingData.x, vpl.x))
+			{
+				continue;
+			}
+			Colour f = shadingData.bsdf->evaluate(shadingData, wi);
+			Colour contrib = f * vpl.flux;
+			contrib = contrib * ((cosSurface * cosVPL) / std::max(EPSILON, distSq));
+			L += contrib;
+		}
+		return L * ((float)instantRadiosityVPLs.size() / (float)maxSamples);
+	}
+
+	void buildInstantRadiosityVPLs(Sampler* sampler)
+	{
+		instantRadiosityVPLs.clear();
+		instantRadiosityVPLs.reserve((size_t)instantRadiosityMaxVPL);
+		for (int p = 0; p < instantRadiosityLightPaths && (int)instantRadiosityVPLs.size() < instantRadiosityMaxVPL; ++p)
+		{
+			float lightPMF = 0.0f;
+			Light* light = scene->sampleLight(sampler, lightPMF);
+			if (light == NULL || lightPMF <= 0.0f)
+			{
+				continue;
+			}
+			float posPdf = 0.0f;
+			Vec3 x = light->samplePositionFromLight(sampler, posPdf);
+			float dirPdf = 0.0f;
+			Vec3 dir = light->sampleDirectionFromLight(sampler, dirPdf);
+			if (posPdf <= 0.0f || dirPdf <= 0.0f)
+			{
+				continue;
+			}
+			Colour Le = light->evaluate(dir);
+			Colour beta = Le / std::max(EPSILON, lightPMF * posPdf * dirPdf);
+
+			Ray ray;
+			ray.init(x + (dir * EPSILON), dir);
+			for (int depth = 0; depth < 5 && (int)instantRadiosityVPLs.size() < instantRadiosityMaxVPL; ++depth)
+			{
+				IntersectionData isect = scene->traverse(ray);
+				if (isect.t == FLT_MAX)
+				{
+					break;
+				}
+				ShadingData sd = scene->calculateShadingData(isect, ray);
+				if (!sd.bsdf->isLight())
+				{
+					VirtualPointLight vpl;
+					vpl.x = sd.x;
+					vpl.n = sd.sNormal;
+					vpl.flux = beta;
+					instantRadiosityVPLs.push_back(vpl);
+				}
+				Colour f(0.0f, 0.0f, 0.0f);
+				float bsdfPdf = 0.0f;
+				Vec3 wi = sd.bsdf->sample(sd, sampler, f, bsdfPdf);
+				if (bsdfPdf <= 0.0f)
+				{
+					break;
+				}
+				float cosTheta = fabsf(Dot(sd.sNormal, wi));
+				beta = beta * f * (cosTheta / bsdfPdf);
+				if (depth > 1)
+				{
+					float rr = std::min(0.95f, std::max(beta.r, std::max(beta.g, beta.b)));
+					if (sampler->next() > rr)
+					{
+						break;
+					}
+					beta = beta / rr;
+				}
+				ray.init(sd.x + (wi * EPSILON), wi);
+			}
+		}
+	}
+
+	void runLightTracingPass(Sampler* sampler)
+	{
+		const int pathCount = std::max(1, lightTracingPathsPerFrame);
+		for (int p = 0; p < pathCount; ++p)
+		{
+			float lightPMF = 0.0f;
+			Light* light = scene->sampleLight(sampler, lightPMF);
+			if (light == NULL || lightPMF <= 0.0f)
+			{
+				continue;
+			}
+			float posPdf = 0.0f;
+			Vec3 x = light->samplePositionFromLight(sampler, posPdf);
+			float dirPdf = 0.0f;
+			Vec3 dir = light->sampleDirectionFromLight(sampler, dirPdf);
+			if (posPdf <= 0.0f || dirPdf <= 0.0f)
+			{
+				continue;
+			}
+			Colour Le = light->evaluate(dir);
+			Colour beta = Le / std::max(EPSILON, lightPMF * posPdf * dirPdf);
+
+			Ray ray;
+			ray.init(x + (dir * EPSILON), dir);
+			for (int depth = 0; depth < 5; ++depth)
+			{
+				IntersectionData isect = scene->traverse(ray);
+				if (isect.t == FLT_MAX)
+				{
+					break;
+				}
+				ShadingData sd = scene->calculateShadingData(isect, ray);
+				if (!sd.bsdf->isLight())
+				{
+					float px = 0.0f;
+					float py = 0.0f;
+					if (scene->camera.projectOntoCamera(sd.x, px, py) && scene->visible(sd.x, scene->camera.origin))
+					{
+						Vec3 toCam = scene->camera.origin - sd.x;
+						float distSq = Dot(toCam, toCam);
+						if (distSq > EPSILON)
+						{
+							toCam = toCam / sqrtf(distSq);
+							float cosSurface = std::max(0.0f, Dot(sd.sNormal, toCam));
+							if (cosSurface > 0.0f)
+							{
+								Colour f = sd.bsdf->evaluate(sd, toCam);
+								Colour contrib = beta * f * (cosSurface / distSq);
+								const unsigned int ix = std::min(film->width - 1, (unsigned int)px);
+								const unsigned int iy = std::min(film->height - 1, (unsigned int)py);
+								const unsigned int idx = ((iy * film->width) + ix) * 3;
+								beautyAOV[idx] += contrib.r;
+								beautyAOV[idx + 1] += contrib.g;
+								beautyAOV[idx + 2] += contrib.b;
+								film->film[(iy * film->width) + ix] = film->film[(iy * film->width) + ix] + contrib;
+							}
+						}
+					}
+				}
+				Colour f(0.0f, 0.0f, 0.0f);
+				float bsdfPdf = 0.0f;
+				Vec3 wi = sd.bsdf->sample(sd, sampler, f, bsdfPdf);
+				if (bsdfPdf <= 0.0f)
+				{
+					break;
+				}
+				float cosTheta = fabsf(Dot(sd.sNormal, wi));
+				beta = beta * f * (cosTheta / bsdfPdf);
+				if (depth > 1)
+				{
+					float rr = std::min(0.95f, std::max(beta.r, std::max(beta.g, beta.b)));
+					if (sampler->next() > rr)
+					{
+						break;
+					}
+					beta = beta / rr;
+				}
+				ray.init(sd.x + (wi * EPSILON), wi);
+			}
+		}
+	}
+
 	void workerLoop(int threadID)
 	{
 		int observedFrameID = 0;

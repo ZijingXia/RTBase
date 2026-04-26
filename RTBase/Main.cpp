@@ -20,9 +20,11 @@ int main(int argc, char *argv[])
 	//return 0;
 	
 	// Initialize default parameters
-	std::string sceneName = "dining-room";
+	std::string sceneName = "bathroom";
 	std::string filename = "GI.hdr";
-	unsigned int SPP = 8196;
+	unsigned int SPP = 100;
+	bool enableLightTracing = true; // key to enable light tracing------------------------------------------------------------------------
+	bool enableInstantRadiosity = true; // key to enable instant radiosity----------------------------------------------------------------
 
 	if (argc > 1)
 	{
@@ -60,6 +62,14 @@ int main(int argc, char *argv[])
 			{
 				SPP = stoi(pair.second);
 			}
+			if (pair.first == "-lightTracing")
+			{
+				enableLightTracing = stoi(pair.second) != 0;
+			}
+			if (pair.first == "-instantRadiosity")
+			{
+				enableInstantRadiosity = stoi(pair.second) != 0;
+			}
 		}
 	}
 	Scene* scene = loadScene(sceneName);
@@ -67,6 +77,8 @@ int main(int argc, char *argv[])
 	canvas.create((unsigned int)scene->camera.width, (unsigned int)scene->camera.height, "Tracer", false);
 	RayTracer rt;
 	rt.init(scene, &canvas);
+	rt.enableLightTracing = enableLightTracing;
+	rt.enableInstantRadiosity = enableInstantRadiosity;
 	bool running = true;
 	GamesEngineeringBase::Timer timer;
 	while (running)
