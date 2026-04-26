@@ -42,7 +42,7 @@ public:
 	std::atomic<int> activeWorkers = 0;
 	bool stopWorkers = false;
 	int submittedFrameID = 0;
-	int denoiseIntervalSPP = 100; // key to change dinoise fps-------------------------------------------------
+	int denoiseIntervalSPP = 1; // key to change dinoise fps-------------------------------------------------
 	std::vector<float> beautyAOV;
 	std::vector<float> normalAOV;
 	std::vector<float> albedoAOV;
@@ -880,6 +880,7 @@ private:
 				Colour normal(0.0f, 0.0f, 0.0f);
 				Colour alb(0.0f, 0.0f, 0.0f);
 				Colour col(0.0f, 0.0f, 0.0f);
+
 				if (enablePathTracing)
 				{
 					col = pathTrace(ray, Colour(1.0f, 1.0f, 1.0f), 0, &samplers[threadID], &normal, &alb);
