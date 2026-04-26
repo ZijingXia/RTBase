@@ -27,7 +27,7 @@
 class RayTracer
 {
 public:
-	bool enableEnvironmentLight = true; // key to open envmap-------------------------------------------------
+	bool enableEnvironmentLight = false; // key to open envmap-------------------------------------------------
 	Scene* scene;
 	GamesEngineeringBase::Window* canvas;
 	Film* film;
@@ -51,6 +51,7 @@ public:
 	bool denoiseFailed = false;
 	bool enableLightTracing = false;
 	bool enableInstantRadiosity = false;
+	bool enablePathTracing = true;
 	int lightTracingPathsPerFrame = 1024;
 	int instantRadiosityLightPaths = 128;
 	int instantRadiosityMaxVPL = 512;
@@ -69,7 +70,7 @@ public:
 		SYSTEM_INFO sysInfo;
 		GetSystemInfo(&sysInfo);
 
-		numProcs = 11;
+		numProcs = 11; // mltithreading test num -------------------------------------------------
 
 		samplers = new MTRandom[numProcs];
 		for (int i = 0; i < numProcs; ++i)
@@ -792,7 +793,11 @@ private:
 
 				Colour normal(0.0f, 0.0f, 0.0f);
 				Colour alb(0.0f, 0.0f, 0.0f);
-				Colour col = pathTrace(ray, Colour(1.0f, 1.0f, 1.0f), 0, &samplers[threadID], &normal, &alb);
+				Colour col(0.0f, 0.0f, 0.0f);
+				if (enablePathTracing)
+				{
+					col = pathTrace(ray, Colour(1.0f, 1.0f, 1.0f), 0, &samplers[threadID], &normal, &alb);
+				}
 				const unsigned int idx = ((y * film->width) + x) * 3;
 				beautyAOV[idx] += col.r;
 				beautyAOV[idx + 1] += col.g;

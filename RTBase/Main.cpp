@@ -20,10 +20,11 @@ int main(int argc, char *argv[])
 	//return 0;
 	
 	// Initialize default parameters
-	std::string sceneName = "bathroom";
+	std::string sceneName = "MaterialsScene";
 	std::string filename = "GI.hdr";
-	unsigned int SPP = 100;
-	bool enableLightTracing = true; // key to enable light tracing------------------------------------------------------------------------
+	unsigned int SPP = 8196;
+	bool enablePathTracing = false; // key to enable path tracing------------------------------------------------------------------------
+	bool enableLightTracing = false; // key to enable light tracing------------------------------------------------------------------------
 	bool enableInstantRadiosity = true; // key to enable instant radiosity----------------------------------------------------------------
 
 	if (argc > 1)
@@ -70,6 +71,10 @@ int main(int argc, char *argv[])
 			{
 				enableInstantRadiosity = stoi(pair.second) != 0;
 			}
+			if (pair.first == "-pathTracing")
+			{
+				enablePathTracing = stoi(pair.second) != 0;
+			}
 		}
 	}
 	Scene* scene = loadScene(sceneName);
@@ -77,6 +82,7 @@ int main(int argc, char *argv[])
 	canvas.create((unsigned int)scene->camera.width, (unsigned int)scene->camera.height, "Tracer", false);
 	RayTracer rt;
 	rt.init(scene, &canvas);
+	rt.enablePathTracing = enablePathTracing;
 	rt.enableLightTracing = enableLightTracing;
 	rt.enableInstantRadiosity = enableInstantRadiosity;
 	bool running = true;
