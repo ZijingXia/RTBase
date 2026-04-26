@@ -27,7 +27,7 @@
 class RayTracer
 {
 public:
-	bool enableEnvironmentLight = false; // key to open envmap-------------------------------------------------
+	bool enableEnvironmentLight = true; // key to open envmap-------------------------------------------------
 	Scene* scene;
 	GamesEngineeringBase::Window* canvas;
 	Film* film;
@@ -52,10 +52,11 @@ public:
 	bool enableLightTracing = false;
 	bool enableInstantRadiosity = false;
 	bool enablePathTracing = true;
-	int lightTracingPathsPerFrame = 1024;
-	int instantRadiosityLightPaths = 128;
-	int instantRadiosityMaxVPL = 512;
-	int instantRadiosityVPLSamplesPerHit = 8;
+	bool enableRecursiveBounce = true;
+	int lightTracingPathsPerFrame = 8196;
+	int instantRadiosityLightPaths = 4096;
+	int instantRadiosityMaxVPL = 4096;
+	int instantRadiosityVPLSamplesPerHit = 64;
 	
 #if RTBASE_HAS_OIDN
 	oidn::DeviceRef oidnDevice;
@@ -420,6 +421,91 @@ public:
 		}
 		return computeDirect(shadingData, sampler);
 	}
+
+	Colour cameraLite(Ray& r, Sampler* sampler, Colour* normalOut = nullptr, Colour* albedoOut = nullptr)
+	{
+		Ray ray = r;
+		Colour throughput(1.0f, 1.0f, 1.0f);
+		Colour L(0.0f, 0.0f, 0.0f);
+		const int maxDepth = 8;
+		for (int depth = 0; depth < maxDepth; ++depth)
+		{
+			IntersectionData intersection = scene->traverse(ray);
+			if (intersection.t == FLT_MAX)
+			{
+				if (depth == 0)
+				{
+					if (normalOut != nullptr)
+					{
+						*normalOut = Colour(0.0f, 0.0f, 0.0f);
+					}
+					if (albedoOut != nullptr)
+					{
+						*albedoOut = Colour(0.0f, 0.0f, 0.0f);
+					}
+				}
+				if (enableEnvironmentLight)
+				{
+					L += throughput * scene->background->evaluate(ray.dir);
+				}
+				break;
+			}
+			ShadingData shadingData = scene->calculateShadingData(intersection, ray);
+			if (depth == 0)
+			{
+				if (normalOut != nullptr)
+				{
+					*normalOut = Colour(shadingData.sNormal.x, shadingData.sNormal.y, shadingData.sNormal.z);
+				}
+				if (albedoOut != nullptr)
+				{
+					if (shadingData.bsdf->isLight())
+					{
+						*albedoOut = Colour(0.0f, 0.0f, 0.0f);
+					}
+					else
+					{
+						*albedoOut = shadingData.bsdf->evaluate(shadingData, Vec3(0, 1, 0));
+					}
+				}
+			}
+			if (shadingData.bsdf->isLight())
+			{
+				L += throughput * shadingData.bsdf->emit(shadingData, shadingData.wo);
+				break;
+			}
+			if (shadingData.bsdf->isPureSpecular() == false)
+			{
+				L += throughput * computeDirect(shadingData, sampler);
+				if (enableInstantRadiosity)
+				{
+					L += throughput * connectToVPLs(shadingData, sampler);
+				}
+				break;
+			}
+			Colour reflected(0.0f, 0.0f, 0.0f);
+			float pdf = 0.0f;
+			Vec3 wi = shadingData.bsdf->sample(shadingData, sampler, reflected, pdf);
+			if (pdf <= 0.0f)
+			{
+				break;
+			}
+			float cosTheta = fabsf(Dot(shadingData.sNormal, wi));
+			throughput = throughput * reflected * (cosTheta / pdf);
+			if (depth > 2)
+			{
+				float rr = std::min(0.95f, std::max(throughput.r, std::max(throughput.g, throughput.b)));
+				if (sampler->next() > rr)
+				{
+					break;
+				}
+				throughput = throughput / rr;
+			}
+			ray.init(shadingData.x + (wi * EPSILON), wi);
+		}
+		return L;
+	}
+
 	Colour albedo(Ray& r)
 	{
 		IntersectionData intersection = scene->traverse(r);
@@ -794,9 +880,13 @@ private:
 				Colour normal(0.0f, 0.0f, 0.0f);
 				Colour alb(0.0f, 0.0f, 0.0f);
 				Colour col(0.0f, 0.0f, 0.0f);
-				if (enablePathTracing)
+				if (enableRecursiveBounce)
 				{
 					col = pathTrace(ray, Colour(1.0f, 1.0f, 1.0f), 0, &samplers[threadID], &normal, &alb);
+				}
+				else
+				{
+					col = cameraLite(ray, &samplers[threadID], &normal, &alb);
 				}
 				const unsigned int idx = ((y * film->width) + x) * 3;
 				beautyAOV[idx] += col.r;

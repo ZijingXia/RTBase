@@ -20,7 +20,7 @@ int main(int argc, char *argv[])
 	//return 0;
 	
 	// Initialize default parameters
-	std::string sceneName = "MaterialsScene";
+	std::string sceneName = "bedroom";
 	std::string filename = "GI.hdr";
 	unsigned int SPP = 8196;
 	bool enablePathTracing = false; // key to enable path tracing------------------------------------------------------------------------
