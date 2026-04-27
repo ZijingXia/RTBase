@@ -42,7 +42,7 @@ public:
 	std::atomic<int> activeWorkers = 0;
 	bool stopWorkers = false;
 	int submittedFrameID = 0;
-	int denoiseIntervalSPP = 1; // key to change dinoise fps-------------------------------------------------
+	int denoiseIntervalSPP = 100; // key to change dinoise fps-------------------------------------------------
 	std::vector<float> beautyAOV;
 	std::vector<float> normalAOV;
 	std::vector<float> albedoAOV;
@@ -53,10 +53,10 @@ public:
 	bool enableInstantRadiosity = false;
 	bool enablePathTracing = true;
 	bool enableRecursiveBounce = true;
-	int lightTracingPathsPerFrame = 100000;
+	int lightTracingPathsPerFrame = 5000000;
 	int instantRadiosityLightPaths = 1024;
 	int instantRadiosityMaxVPL = 512;
-	int instantRadiosityVPLSamplesPerHit = 16;
+	int instantRadiosityVPLSamplesPerHit = 8;
 	
 #if RTBASE_HAS_OIDN
 	oidn::DeviceRef oidnDevice;

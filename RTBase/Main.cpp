@@ -22,10 +22,10 @@ int main(int argc, char *argv[])
 	// Initialize default parameters
 	std::string sceneName = "dining-room";
 	std::string filename = "GI.hdr";
-	unsigned int SPP = 8196;
+	unsigned int SPP = 100;
 	bool enablePathTracing = true; // key to enable path tracing------------------------------------------------------------------------
 	bool enableLightTracing = false; // key to enable light tracing------------------------------------------------------------------------
-	bool enableInstantRadiosity = false; // key to enable instant radiosity----------------------------------------------------------------
+	bool enableInstantRadiosity = true; // key to enable instant radiosity----------------------------------------------------------------
 
 	if (argc > 1)
 	{
